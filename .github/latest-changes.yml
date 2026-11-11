@@ -1,0 +1,13 @@
+# Labels the latest-changes app applies from the paths a pull request changes.
+# They are used for pull requests the emoji mapping leaves unlabelled, such as
+# pull requests from forks and from Dependabot.
+auto-labels:
+  docs:
+    - "*.md"
+    - "**/*.md"
+  upgrade:
+    - go.mod
+    - go.sum
+  internal:
+    - .github/**
+    - .gitignore
