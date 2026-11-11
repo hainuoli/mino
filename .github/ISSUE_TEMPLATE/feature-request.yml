@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose an improvement to Mino.
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: "Please search existing feature requests first. Large API changes are discussed via issues before implementation — see [CONTRIBUTING.md](https://github.com/hainuoli/mino/blob/main/CONTRIBUTING.md)."
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Problem and motivation
+      description: What concrete problem needs solving?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed API or behavior
+      description: Show an example if possible.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing Go standard library or ecosystem approaches.
+  - type: textarea
+    id: tradeoffs
+    attributes:
+      label: Compatibility and trade-offs
+      description: Effects on API consistency, performance, and package dependencies.

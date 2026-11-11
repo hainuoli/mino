@@ -1,0 +1,6 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: Documentation issues and suggestions
+    url: https://github.com/hainuoli/mino-doc/issues/new/choose
+    about: Problems or proposals about Mino documentation belong in the docs repository.

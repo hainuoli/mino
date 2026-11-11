@@ -1,0 +1,50 @@
+name: Bug report
+description: Report a reproducible bug in Mino.
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: "Please search existing issues first. Do not disclose security vulnerabilities publicly — report them via [private vulnerability reporting](https://github.com/hainuoli/mino/security/advisories/new)."
+  - type: textarea
+    id: problem
+    attributes:
+      label: Description
+      description: What went wrong?
+      placeholder: A concise description of the unexpected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Include a minimal Go example or a link to one.
+      render: go
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Mino version or commit
+      placeholder: v0.x.y or commit SHA
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Go version and operating system
+      placeholder: go1.x, macOS/Linux/Windows
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Logs, screenshots, or relevant details without secrets.
