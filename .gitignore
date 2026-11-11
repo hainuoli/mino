@@ -1,0 +1,19 @@
+# Go build and test artifacts
+/bin/
+/dist/
+/coverage/
+*.test
+*.out
+coverage.txt
+coverage.out
+
+# Editors / OS
+.DS_Store
+.tmp/
+.idea/
+.vscode/
+
+# Local environment
+.env
+.env.*
+!.env.example
