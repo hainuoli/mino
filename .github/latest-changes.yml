@@ -1,13 +1,15 @@
-# Labels the latest-changes app applies from the paths a pull request changes.
-# They are used for pull requests the emoji mapping leaves unlabelled, such as
-# pull requests from forks and from Dependabot.
+# Latest Changes classifies paths; maintainers classify source changes.
+commit-title: "📝 Update release notes"
 auto-labels:
   docs:
-    - "*.md"
-    - "**/*.md"
+    - CHANGELOG.md
+    - README*.md
+    - CONTRIBUTING.md
+    - SECURITY.md
   upgrade:
     - go.mod
     - go.sum
   internal:
     - .github/**
     - .gitignore
+    - .gitattributes

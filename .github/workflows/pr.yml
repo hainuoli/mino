@@ -22,36 +22,39 @@ jobs:
         env:
           TITLE: ${{ github.event.pull_request.title }}
         run: |
-          # Compare bytes so an emoji is one unit regardless of the locale.
-          export LC_ALL=C
+          set -euo pipefail
+          export LC_ALL=C.UTF-8
 
           fail() {
             echo "::error::$1"
-            echo 'Titles start with an emoji, then a space, then an imperative sentence:'
+            echo 'Use a supported Gitmoji, one space, and an imperative sentence:'
             echo '  ✨ Add HTTP routing foundation'
             exit 1
           }
 
-          if [[ "$TITLE" != *" "* ]]; then
-            fail 'The title needs an emoji prefix and a space.'
+          if (( ${#TITLE} > 72 )); then
+            fail 'The title must be 72 characters or fewer.'
           fi
 
-          prefix=${TITLE%% *}
+          case "$TITLE" in
+            "✨ "*|"🐛 "*|"💥 "*|"🔒️ "*|"🔒 "*|\
+            "📝 "*|"✏️ "*|"✏ "*|"🌐 "*|\
+            "⬆️ "*|"⬆ "*|"⬇️ "*|"⬇ "*|"♻️ "*|"♻ "*|\
+            "🎨 "*|"⚡️ "*|"⚡ "*|"🔥 "*|\
+            "👷 "*|"🔧 "*|"🔨 "*|"🚨 "*|\
+            "✅ "*|"🔖 "*|"🎉 "*|"📄 "*|"🙈 "*) ;;
+            *) fail 'The title must start with a supported Gitmoji followed by a space.' ;;
+          esac
+
+          if [[ "$TITLE" =~ [[:cntrl:]] ]]; then
+            fail 'The title must be a single line without control characters.'
+          fi
+
+          if [[ "$TITLE" == *"  "* || "$TITLE" == *" " ]]; then
+            fail 'Do not use consecutive or trailing spaces.'
+          fi
+
           rest=${TITLE#* }
-
-          # Any emoji is accepted; the Labels job only maps the ones it knows.
-          case "$prefix" in
-            *[!-~]*) ;;
-            *) fail "The title must start with an emoji, not '$prefix'." ;;
-          esac
-
-          case "$prefix" in
-            *[A-Za-z0-9]*) fail "The title must start with an emoji, not '$prefix'." ;;
-          esac
-
-          if [[ -z "${rest// /}" ]]; then
-            fail 'The title needs a sentence after the emoji.'
-          fi
 
           if [[ ! "$rest" =~ ^[A-Z] ]]; then
             fail 'The sentence after the emoji must start with a capital letter.'
@@ -62,75 +65,3 @@ jobs:
           fi
 
           echo 'Title format is valid.'
-
-  labels:
-    name: Labels
-    # A push cannot change the title, and a pull request from a fork or from
-    # Dependabot gets a read-only token. Their paths are labelled by the
-    # latest-changes app, or the maintainer sets the label by hand.
-    if: >-
-      github.event.action != 'synchronize' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.user.login != 'dependabot[bot]'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      issues: write
-      pull-requests: write
-    steps:
-      - name: Apply the label for the title
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
-          TITLE: ${{ github.event.pull_request.title }}
-        run: |
-          set -euo pipefail
-
-          # The latest-changes app reads these labels, so they are the only
-          # ones this job manages.
-          label=''
-          color=''
-          description=''
-
-          case "$TITLE" in
-            "✨ "*)  label=feature;   color=1D76DB; description='A new feature' ;;
-            "🐛 "*)  label=bug;       color=D73A4A; description='Something is not working' ;;
-            "💥 "*)  label=breaking;  color=8B0000; description='Breaking change' ;;
-            "🔒️ "*|"🔒 "*) label=security; color=EE0701; description='Security fix' ;;
-            "📝 "*|"✏️ "*|"✏ "*) label=docs; color=0075CA; description='Documentation only' ;;
-            "🌐 "*)  label=lang-all;  color=5319E7; description='Translation updates' ;;
-            "⬆️ "*|"⬆ "*) label=upgrade; color=0366D6; description='Dependency upgrades' ;;
-            "♻️ "*|"♻ "*|"🎨 "*|"⚡️ "*|"⚡ "*|"🔥 "*) label=refactor; color=C5DEF5; description='No new behavior' ;;
-            "👷 "*|"🔧 "*|"🔨 "*|"🚨 "*|"✅ "*) label=internal; color=EDEDED; description='CI, tooling and tests' ;;
-            "🔖 "*)  label=release;   color=BFD4F2; description='Skipped by the latest-changes app' ;;
-          esac
-
-          if [[ -z "$label" ]]; then
-            echo 'The emoji has no label; set one by hand so the release notes group the change.'
-            exit 0
-          fi
-
-          if ! gh api "repos/$GH_REPO/labels/$label" >/dev/null 2>&1; then
-            gh api --method POST "repos/$GH_REPO/labels" \
-              -f name="$label" -f color="$color" -f description="$description" >/dev/null
-          fi
-
-          managed='breaking security feature bug refactor upgrade docs lang-all infra internal release'
-
-          # Read the labels once and delete only managed ones, so unrelated
-          # labels and repeat runs are left alone.
-          gh api "repos/$GH_REPO/issues/$PR/labels" --jq '.[].name' |
-            while read -r name; do
-              case " $managed " in
-                *" $name "*) ;;
-                *) continue ;;
-              esac
-              if [[ "$name" != "$label" ]]; then
-                gh api --method DELETE "repos/$GH_REPO/issues/$PR/labels/$name" >/dev/null
-              fi
-            done
-
-          gh api --method POST "repos/$GH_REPO/issues/$PR/labels" -f "labels[]=$label" >/dev/null

@@ -128,10 +128,10 @@ jobs:
             inside && /^## / { exit }
             inside && !started && /^[[:space:]]*$/ { next }
             inside { started = 1; print }
-          ' docs/release-notes.md > "$RUNNER_TEMP/notes.md"
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
 
           if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
-            echo "::error::docs/release-notes.md has no section for ${version}."
+            echo "::error::CHANGELOG.md has no section for ${version}."
             echo "Cut the Latest Changes section into '## ${version} (YYYY-MM-DD)' before tagging."
             exit 1
           fi

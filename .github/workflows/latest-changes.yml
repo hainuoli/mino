@@ -1,0 +1,33 @@
+name: Latest Changes
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled, closed]
+  workflow_dispatch:
+    inputs:
+      pull-request:
+        description: Pull request number to reprocess
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: latest-changes-${{ github.repository }}
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Process pull request
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # No checkout: never run code from the pull request with this token.
+      - uses: hainuoli/latest-changes@f3dee2de6bbee92f53200b342e67a56ccf1a5ad1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request: ${{ inputs.pull-request }}
