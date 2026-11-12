@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 5
     steps:
       # No checkout: never run code from the pull request with this token.
-      - uses: hainuoli/latest-changes@f3dee2de6bbee92f53200b342e67a56ccf1a5ad1
+      - uses: hainuoli/latest-changes@283a233f13b317c9def1f1fbd82fcfaaa4966fac
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           pull-request: ${{ inputs.pull-request }}
