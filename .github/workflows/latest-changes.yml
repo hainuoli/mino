@@ -11,7 +11,7 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
   statuses: write
 
@@ -27,7 +27,8 @@ jobs:
     timeout-minutes: 5
     steps:
       # No checkout: never run code from the pull request with this token.
-      - uses: hainuoli/latest-changes@283a233f13b317c9def1f1fbd82fcfaaa4966fac
+      - uses: hainuoli/latest-changes@6fe671b882f45b19675f1c681580a5bf3b680d70
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          notes-token: ${{ secrets.LATEST_CHANGES_TOKEN }}
           pull-request: ${{ inputs.pull-request }}
