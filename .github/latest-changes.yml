@@ -1,5 +1,6 @@
-# Latest Changes classifies paths; maintainers classify source changes.
+# Existing categories take precedence; otherwise classify titles, then paths.
 commit-title: "📝 Update release notes"
+label-from-title: true
 auto-labels:
   docs:
     - CHANGELOG.md
