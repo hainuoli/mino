@@ -8,6 +8,7 @@ after the version.
 
 ### Features
 
+* ✨ Add tagged struct binding. PR [#5](https://github.com/hainuoli/mino/pull/5) by [@hainuoli](https://github.com/hainuoli).
 * ✨ Add reusable error handling utilities. PR [#4](https://github.com/hainuoli/mino/pull/4) by [@hainuoli](https://github.com/hainuoli).
 * ✨ Add JSON codec and helpers. PR [#2](https://github.com/hainuoli/mino/pull/2) by [@hainuoli](https://github.com/hainuoli).
 * ✨ Add HTTP routing foundation. Commit [`0d44b0d`](https://github.com/hainuoli/mino/commit/0d44b0dfd4cf5bd1dba725b38b8c8ab92d67ed17).
