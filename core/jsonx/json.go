@@ -13,19 +13,17 @@ var (
 )
 
 type (
-	// Codec is the JSON implementation used by the package-level functions.
+	// Codec defines JSON encoding, decoding, and validation methods.
 	// Implementations must be safe for concurrent use.
 	Codec interface {
-		// Marshal returns v encoded as a single JSON value, with no trailing
-		// whitespace.
+		// Marshal encodes v into a single JSON value without trailing whitespace.
 		Marshal(v any) ([]byte, error)
 
-		// Unmarshal decodes a complete JSON document into v. Surrounding
-		// whitespace is allowed; extra values and trailing content are not.
+		// Unmarshal decodes a complete JSON document into v.
+		// Surrounding whitespace is allowed; extra values and trailing content are not.
 		Unmarshal(data []byte, v any) error
 
-		// Valid reports whether data is a complete JSON document in the same
-		// syntax Unmarshal accepts.
+		// Valid reports whether data contains a valid JSON document.
 		Valid(data []byte) bool
 	}
 
@@ -35,11 +33,16 @@ type (
 
 var mc Codec = mCodec{}
 
-// SetCodec replaces the Codec used by the package-level functions.
+// SetCodec replaces the process-wide JSON Codec. It affects all calls through
+// jsonx, including Mino packages that use jsonx, and is not per-server or
+// per-route configuration.
 //
 // Call it once at startup, before any concurrent JSON operation; later calls
-// replace the previous Codec. A nil Codec returns an error and keeps the
-// current one.
+// replace the previous Codec. A nil Codec returns an error and keeps the current one.
+//
+//	if err := jsonx.SetCodec(sonicCodec); err != nil {
+//		panic(err)
+//	}
 func SetCodec(c Codec) error {
 	if isNilCodec(c) {
 		return errNilCodec
@@ -60,13 +63,19 @@ func (mCodec) Valid(data []byte) bool {
 	return json.Valid(data)
 }
 
-// Marshal returns v encoded as a single JSON value using the current Codec.
+// Marshal returns the JSON encoding of v.
+//
+//	data, err :=jsonx.Marshal(map[string]string{"name": "Hainuo"})
+//	// string(data) -> `{"name":"Hainuo"}`
 func Marshal(v any) ([]byte, error) {
 	return mc.Marshal(v)
 }
 
-// MarshalToString returns v encoded as a JSON string.
-// It returns an empty string and the error when encoding fails.
+// MarshalToString returns the JSON encoding of v as a string.
+// It returns an empty string when encoding fails.
+//
+//	data, err := jsonx.MarshalToString(map[string]string{"name": "Hainuo"})
+//	// data -> `{"name":"Hainuo"}`
 func MarshalToString(v any) (string, error) {
 	data, err := Marshal(v)
 	if err != nil {
@@ -75,19 +84,31 @@ func MarshalToString(v any) (string, error) {
 	return string(data), nil
 }
 
-// Unmarshal decodes data into v using the current Codec.
+// Unmarshal decodes a complete JSON document into v.
+//
+//	var user map[string]string
+//	err := jsonx.Unmarshal([]byte(`{"name":"Hainuo"}`), &user)
+//	// user["name"] -> "Hainuo"
 func Unmarshal(data []byte, v any) error {
 	return mc.Unmarshal(data, v)
 }
 
-// UnmarshalFromString decodes data into v using the current Codec.
+// UnmarshalFromString decodes a JSON string into v.
+//
+//	var user map[string]string
+//	err := jsonx.UnmarshalFromString(`{"name":"Hainuo"}`, &user)
+//	// user["name"] -> "Hainuo"
 func UnmarshalFromString(data string, v any) error {
 	return Unmarshal([]byte(data), v)
 }
 
 // UnmarshalFromReader reads r to EOF and decodes the content into v.
-// It does not close r, and it returns an error without decoding when r is nil
-// or reading fails.
+// It does not close r, Read errors are returned without decoding.
+//
+//	var user map[string]string
+//	r := strings.NewReader(`{"name":"Hainuo"}`)
+//	err := jsonx.UnmarshalFromReader(r, &user)
+//	// user["name"] -> "Hainuo"
 func UnmarshalFromReader(r io.Reader, v any) error {
 	if r == nil {
 		return errNilReader
@@ -99,8 +120,11 @@ func UnmarshalFromReader(r io.Reader, v any) error {
 	return Unmarshal(data, v)
 }
 
-// Valid reports whether data is a complete JSON document, using the current
-// Codec.
+// Valid reports whether data is a complete JSON document.
+//
+//	if jsonx.Valid(`{"name":"Hainuo"}`)) {
+//		// valid JSON
+//	}
 func Valid(data []byte) bool {
 	return mc.Valid(data)
 }
