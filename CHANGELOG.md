@@ -18,6 +18,7 @@ after the version.
 
 ### Docs
 
+* 📝 Clarify errorx and jsonx documentation. PR [#10](https://github.com/hainuoli/mino/pull/10) by [@hainuoli](https://github.com/hainuoli).
 * 📝 Clarify jsonx documentation. PR [#6](https://github.com/hainuoli/mino/pull/6) by [@hainuoli](https://github.com/hainuoli).
 * 📝 Backfill changelog history. PR [#1](https://github.com/hainuoli/mino/pull/1) by [@hainuoli](https://github.com/hainuoli).
 * 📝 Add release notes. Commit [`ea9e832`](https://github.com/hainuoli/mino/commit/ea9e832555549e5092c677f97686e59aef926980).
