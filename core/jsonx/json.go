@@ -65,7 +65,7 @@ func (mCodec) Valid(data []byte) bool {
 
 // Marshal returns the JSON encoding of v.
 //
-//	data, err :=jsonx.Marshal(map[string]string{"name": "Hainuo"})
+//	data, err := jsonx.Marshal(map[string]string{"name": "Hainuo"})
 //	// string(data) -> `{"name":"Hainuo"}`
 func Marshal(v any) ([]byte, error) {
 	return mc.Marshal(v)
@@ -122,7 +122,7 @@ func UnmarshalFromReader(r io.Reader, v any) error {
 
 // Valid reports whether data is a complete JSON document.
 //
-//	if jsonx.Valid(`{"name":"Hainuo"}`)) {
+//	if jsonx.Valid([]byte(`{"name":"Hainuo"}`)) {
 //		// valid JSON
 //	}
 func Valid(data []byte) bool {

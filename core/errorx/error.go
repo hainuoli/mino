@@ -8,11 +8,11 @@ import (
 	gofmt "fmt"
 )
 
-// Wrap add message to err while preserving the original error.
-// It return nil if err is nil.
+// Wrap adds msg to err while preserving the original error.
+// It returns nil if err is nil.
 //
 //	err := errorx.Wrap(io.EOF, "read resp")
-//	// read resp: EOF
+//	// err -> read resp: EOF
 func Wrap(err error, msg string) error {
 	if err == nil {
 		return nil
@@ -20,11 +20,11 @@ func Wrap(err error, msg string) error {
 	return gofmt.Errorf("%s: %w", msg, err)
 }
 
-// Wrapf formats a message and warps err with it.
-// It return nil if err is nil.
+// Wrapf formats a message and wraps err with it.
+// It returns nil if err is nil.
 //
 //	err := errorx.Wrapf(io.EOF, "read file %s", "data.json")
-//	// read file data.json: EOF
+//	// err -> read file data.json: EOF
 func Wrapf(err error, fmt string, args ...any) error {
 	if err == nil {
 		return nil
@@ -47,7 +47,7 @@ func In(err error, errs ...error) bool {
 }
 
 // Chain executes fns in order and stops at the first non-nil error.
-// It return nil if all functions succeed.
+// It returns nil if all functions succeed.
 //
 //	err := errorx.Chain(
 //		func() error { return validate() },
@@ -64,8 +64,6 @@ func Chain(fns ...func() error) error {
 
 // AtomicError stores the latest non-nil error safely across goroutines.
 // The zero value is ready to use.
-//
-// All stored errors must have the same concrete type.
 type AtomicError struct{ err atomic.Pointer[error] }
 
 // Set stores err, replacing the previously stored error.
@@ -73,7 +71,7 @@ type AtomicError struct{ err atomic.Pointer[error] }
 //
 //	var ae AtomicError
 //	ae.Set(nil)
-//	// -> ignored.
+//	// ae.Load() -> nil
 func (ae *AtomicError) Set(err error) {
 	if err != nil {
 		ae.err.Store(&err)
@@ -84,7 +82,7 @@ func (ae *AtomicError) Set(err error) {
 //
 //	var ae AtomicError
 //	err := ae.Load()
-//	// -> err is nil
+//	// err -> nil
 func (ae *AtomicError) Load() error {
 	if ptr := ae.err.Load(); ptr != nil {
 		return *ptr
@@ -102,8 +100,8 @@ type BatchError struct {
 // Add appends one or more non-nil errors to the batch.
 //
 //	var be BatchError
-//	be.Add(err1, err2) // The err1, err2, err3 and err4 can
-//	be.Add(err3, err4) // example: db.Close(), errors.New("is err"), ...
+//	be.Add(err1, err2)
+//	be.Add(err3, err4) // be now holds err1, err2, err3, err4
 func (be *BatchError) Add(errs ...error) {
 	be.lock.Lock()
 	defer be.lock.Unlock()
@@ -115,15 +113,14 @@ func (be *BatchError) Add(errs ...error) {
 	}
 }
 
-// Err return all collected errors joined into a single error.
+// Err returns all collected errors joined into a single error.
 // It returns nil if no errors have been added.
 // The returned error supports errors.Is and errors.As.
 //
 //	var be BatchError
 //	be.Add(err1, err2)
-//	fmt.Println(be.Err())
-//	// Output:
-//	//  -> err1, err2
+//	err := be.Err()
+//	// errors.Is(err, err1) -> true
 func (be *BatchError) Err() error {
 	be.lock.RLock()
 	defer be.lock.RUnlock()
