@@ -23,6 +23,7 @@ after the version.
 
 ### Internal
 
+* ✅ Unify test style across packages. PR [#7](https://github.com/hainuoli/mino/pull/7) by [@hainuoli](https://github.com/hainuoli).
 * 👷 Configure Gitmoji labels and release-note credentials. PR [#3](https://github.com/hainuoli/mino/pull/3) by [@hainuoli](https://github.com/hainuoli).
 * 👷 Use Actions for changelog updates. Commit [`1282009`](https://github.com/hainuoli/mino/commit/12820090738a17999932928eeafbbbc12745fff1).
 * 🔧 Point documentation issues to the main repository. Commit [`d16cc9c`](https://github.com/hainuoli/mino/commit/d16cc9c9d53e6cd554886ae7063d3c42a80282f8).
