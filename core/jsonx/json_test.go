@@ -101,79 +101,85 @@ func (r *closeTrackingReader) Close() error {
 }
 
 func TestMarshal(t *testing.T) {
+	ast := assert.New(t)
 	data, err := Marshal(struct {
 		Name string `json:"name"`
 		Age  int    `json:"age"`
 	}{Name: "Hainuo", Age: 30})
-	assert.NoError(t, err)
-	assert.Equal(t, `{"name":"Hainuo","age":30}`, string(data))
+	ast.NoError(err)
+	ast.Equal(`{"name":"Hainuo","age":30}`, string(data))
 
 	_, err = Marshal(make(chan int))
-	assert.Error(t, err)
+	ast.Error(err)
 }
 
 func TestDefaultCodecMatchesStdlib(t *testing.T) {
+	ast := assert.New(t)
 	data, err := Marshal("<a>")
-	assert.NoError(t, err)
-	assert.Equal(t, `"\u003ca\u003e"`, string(data))
+	ast.NoError(err)
+	ast.Equal(`"\u003ca\u003e"`, string(data))
 
 	data, err = Marshal([]int{1, 2})
-	assert.NoError(t, err)
-	assert.Equal(t, `[1,2]`, string(data))
-	assert.NotContains(t, string(data), "\n")
+	ast.NoError(err)
+	ast.Equal(`[1,2]`, string(data))
+	ast.NotContains(string(data), "\n")
 }
 
 func TestMarshalToString(t *testing.T) {
+	ast := assert.New(t)
 	text, err := MarshalToString(map[string]int{"a": 1})
-	assert.NoError(t, err)
-	assert.Equal(t, `{"a":1}`, text)
+	ast.NoError(err)
+	ast.Equal(`{"a":1}`, text)
 
 	text, err = MarshalToString(make(chan int))
-	assert.Error(t, err)
-	assert.Empty(t, text)
+	ast.Error(err)
+	ast.Empty(text)
 }
 
 func TestUnmarshal(t *testing.T) {
+	ast := assert.New(t)
 	var target struct {
 		Name string `json:"name"`
 	}
 
-	assert.NoError(t, Unmarshal([]byte(`{"name":"Hainuo"}`), &target))
-	assert.Equal(t, "Hainuo", target.Name)
+	ast.NoError(Unmarshal([]byte(`{"name":"Hainuo"}`), &target))
+	ast.Equal("Hainuo", target.Name)
 
-	assert.Error(t, Unmarshal([]byte(`{"name":`), &target))
-	assert.Error(t, Unmarshal([]byte(`{"name":"Hainuo"}{}`), &target))
-	assert.Error(t, Unmarshal([]byte(`{"name":1}`), &target))
+	ast.Error(Unmarshal([]byte(`{"name":`), &target))
+	ast.Error(Unmarshal([]byte(`{"name":"Hainuo"}{}`), &target))
+	ast.Error(Unmarshal([]byte(`{"name":1}`), &target))
 }
 
 func TestUnmarshalFromString(t *testing.T) {
+	ast := assert.New(t)
 	var target map[string]int
 
-	assert.NoError(t, UnmarshalFromString(`{"a":1}`, &target))
-	assert.Equal(t, map[string]int{"a": 1}, target)
+	ast.NoError(UnmarshalFromString(`{"a":1}`, &target))
+	ast.Equal(map[string]int{"a": 1}, target)
 
-	assert.Error(t, UnmarshalFromString(`{`, &target))
+	ast.Error(UnmarshalFromString(`{`, &target))
 }
 
 func TestUnmarshalFromReader(t *testing.T) {
+	ast := assert.New(t)
 	var target struct {
 		Name string `json:"name"`
 	}
 
-	assert.NoError(t, UnmarshalFromReader(strings.NewReader(`{"name":"Hainuo"}`), &target))
-	assert.Equal(t, "Hainuo", target.Name)
+	ast.NoError(UnmarshalFromReader(strings.NewReader(`{"name":"Hainuo"}`), &target))
+	ast.Equal("Hainuo", target.Name)
 
-	assert.ErrorIs(t, UnmarshalFromReader(nil, &target), errNilReader)
+	ast.ErrorIs(UnmarshalFromReader(nil, &target), errNilReader)
 
 	readErr := errors.New("read failed")
-	assert.ErrorIs(t, UnmarshalFromReader(failingReader{err: readErr}, &target), readErr)
+	ast.ErrorIs(UnmarshalFromReader(failingReader{err: readErr}, &target), readErr)
 
-	assert.Error(t, UnmarshalFromReader(strings.NewReader(`{"name":`), &target))
+	ast.Error(UnmarshalFromReader(strings.NewReader(`{"name":`), &target))
 
 	reader := &closeTrackingReader{Reader: strings.NewReader(`{"name":"海诺"}`)}
-	assert.NoError(t, UnmarshalFromReader(reader, &target))
-	assert.Equal(t, "海诺", target.Name)
-	assert.False(t, reader.closed)
+	ast.NoError(UnmarshalFromReader(reader, &target))
+	ast.Equal("海诺", target.Name)
+	ast.False(reader.closed)
 }
 
 func TestValid(t *testing.T) {
@@ -191,90 +197,95 @@ func TestValid(t *testing.T) {
 		{"trailing content", `{} x`, false},
 		{"truncated", `{"a":`, false},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.want, Valid([]byte(test.data)))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			ast.Equal(tt.want, Valid([]byte(tt.data)))
 		})
 	}
 }
 
 func TestSetCodec(t *testing.T) {
+	ast := assert.New(t)
 	previous := mc
 	t.Cleanup(func() { _ = SetCodec(previous) })
 
 	first := &fakeCodec{marshalData: []byte(`1`)}
 	second := &fakeCodec{marshalData: []byte(`2`)}
 
-	assert.NoError(t, SetCodec(first))
-	assert.NoError(t, SetCodec(second))
+	ast.NoError(SetCodec(first))
+	ast.NoError(SetCodec(second))
 
 	data, err := Marshal(nil)
-	assert.NoError(t, err)
-	assert.Equal(t, `2`, string(data))
-	assert.Zero(t, first.marshalCalls)
-	assert.Equal(t, 1, second.marshalCalls)
+	ast.NoError(err)
+	ast.Equal(`2`, string(data))
+	ast.Zero(first.marshalCalls)
+	ast.Equal(1, second.marshalCalls)
 
-	assert.ErrorIs(t, SetCodec(nil), errNilCodec)
-	assert.ErrorIs(t, SetCodec((*fakeCodec)(nil)), errNilCodec)
+	ast.ErrorIs(SetCodec(nil), errNilCodec)
+	ast.ErrorIs(SetCodec((*fakeCodec)(nil)), errNilCodec)
 
 	data, err = Marshal(nil)
-	assert.NoError(t, err)
-	assert.Equal(t, `2`, string(data), "a rejected Codec must keep the current one")
+	ast.NoError(err)
+	ast.Equal(`2`, string(data), "a rejected Codec must keep the current one")
 
-	assert.NoError(t, SetCodec(structCodec{}))
+	ast.NoError(SetCodec(structCodec{}))
 }
 
 func TestDelegation(t *testing.T) {
+	ast := assert.New(t)
 	codec := &fakeCodec{marshalData: []byte(`{"ok":true}`), validResult: true}
 	useCodec(t, codec)
 
 	value := map[string]bool{"ok": true}
 	data, err := Marshal(value)
-	assert.NoError(t, err)
-	assert.Equal(t, `{"ok":true}`, string(data))
-	assert.Equal(t, value, codec.lastValue)
+	ast.NoError(err)
+	ast.Equal(`{"ok":true}`, string(data))
+	ast.Equal(value, codec.lastValue)
 
 	text, err := MarshalToString("ok")
-	assert.NoError(t, err)
-	assert.Equal(t, `{"ok":true}`, text)
-	assert.Equal(t, "ok", codec.lastValue)
+	ast.NoError(err)
+	ast.Equal(`{"ok":true}`, text)
+	ast.Equal("ok", codec.lastValue)
 
 	var target any
-	assert.NoError(t, Unmarshal([]byte(`{"a":1}`), &target))
-	assert.Equal(t, []byte(`{"a":1}`), codec.lastData)
+	ast.NoError(Unmarshal([]byte(`{"a":1}`), &target))
+	ast.Equal([]byte(`{"a":1}`), codec.lastData)
 
-	assert.NoError(t, UnmarshalFromString(`[1]`, &target))
-	assert.Equal(t, []byte(`[1]`), codec.lastData)
+	ast.NoError(UnmarshalFromString(`[1]`, &target))
+	ast.Equal([]byte(`[1]`), codec.lastData)
 
-	assert.NoError(t, UnmarshalFromReader(strings.NewReader(`true`), &target))
-	assert.Equal(t, []byte(`true`), codec.lastData)
-	assert.Equal(t, 3, codec.unmarshalCalls)
+	ast.NoError(UnmarshalFromReader(strings.NewReader(`true`), &target))
+	ast.Equal([]byte(`true`), codec.lastData)
+	ast.Equal(3, codec.unmarshalCalls)
 
-	assert.True(t, Valid([]byte(`{}`)))
-	assert.Equal(t, []byte(`{}`), codec.lastData)
-	assert.Equal(t, 1, codec.validCalls)
+	ast.True(Valid([]byte(`{}`)))
+	ast.Equal([]byte(`{}`), codec.lastData)
+	ast.Equal(1, codec.validCalls)
 }
 
 func TestDelegationErrors(t *testing.T) {
+	ast := assert.New(t)
 	marshalErr := errors.New("marshal failed")
 	codec := &fakeCodec{marshalErr: marshalErr, unmarshalErr: errors.New("unmarshal failed")}
 	useCodec(t, codec)
 
 	_, err := Marshal(1)
-	assert.ErrorIs(t, err, marshalErr)
+	ast.ErrorIs(err, marshalErr)
 
 	text, err := MarshalToString(1)
-	assert.ErrorIs(t, err, marshalErr)
-	assert.Empty(t, text)
+	ast.ErrorIs(err, marshalErr)
+	ast.Empty(text)
 
-	assert.ErrorIs(t, Unmarshal([]byte(`1`), new(any)), codec.unmarshalErr)
-	assert.ErrorIs(t, UnmarshalFromString(`1`, new(any)), codec.unmarshalErr)
-	assert.ErrorIs(t, UnmarshalFromReader(strings.NewReader(`1`), new(any)), codec.unmarshalErr)
+	ast.ErrorIs(Unmarshal([]byte(`1`), new(any)), codec.unmarshalErr)
+	ast.ErrorIs(UnmarshalFromString(`1`, new(any)), codec.unmarshalErr)
+	ast.ErrorIs(UnmarshalFromReader(strings.NewReader(`1`), new(any)), codec.unmarshalErr)
 }
 
 func TestIsNilCodec(t *testing.T) {
+	ast := assert.New(t)
 	var nilCodec Codec
-	assert.True(t, isNilCodec(nilCodec))
+	ast.True(isNilCodec(nilCodec))
 
 	var nilPtr *structCodec
 	tests := []struct {
@@ -294,9 +305,10 @@ func TestIsNilCodec(t *testing.T) {
 		{"chan", make(chanCodec), false},
 		{"value", structCodec{}, false},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.want, isNilCodec(test.c))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			ast.Equal(tt.want, isNilCodec(tt.c))
 		})
 	}
 }
