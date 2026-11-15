@@ -10,9 +10,28 @@ import (
 	"github.com/hainuoli/mino/core/errorx"
 )
 
-// ErrInvalidTarget indicates an invalid bind destination, including
+// ErrInvalidTarget indicates an invalid mapping destination, including
 // unsupported field types and inaccessible embedded pointers.
 var ErrInvalidTarget = errors.New("mapping: invalid target")
+
+// Deref returns the value addressed by a non-nil pointer.
+// It dereferences one level without allocating or modifying the target.
+// Invalid targets return an error matching ErrInvalidTarget.
+//
+//	count := 1
+//	target, err := mapping.Deref(&count)
+//	if err != nil {
+//		panic(err)
+//	}
+//	target.SetInt(42)
+//	// count -> 42
+func Deref(v any) (reflect.Value, error) {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
+		return reflect.Value{}, fmt.Errorf("%w: expected a non-nil pointer, got %T", ErrInvalidTarget, v)
+	}
+	return rv.Elem(), nil
+}
 
 // Bind fills the tagged fields of v with values from lookup.
 // v must be a non-nil pointer to a struct. Fields without the tag or without
@@ -28,11 +47,13 @@ var ErrInvalidTarget = errors.New("mapping: invalid target")
 //	})
 //	// r.Page -> 52 for the query "?page=52"
 func Bind(v any, tag string, lookup func(string) []string) error {
-	rv := reflect.ValueOf(v)
-	if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Elem().Kind() != reflect.Struct {
+	rv, err := Deref(v)
+	if err != nil {
+		return err
+	}
+	if rv.Kind() != reflect.Struct {
 		return fmt.Errorf("%w: expected a non-nil pointer to struct, got %T", ErrInvalidTarget, v)
 	}
-	rv = rv.Elem()
 	if lookup == nil {
 		return nil
 	}
