@@ -50,77 +50,82 @@ func (s mockSub) Routes() []Route                              { return s.routes
 func (s mockSub) Middlewares() []chain.Middleware              { return nil }
 
 func TestAddRoutePanics(t *testing.T) {
+	ast := assert.New(t)
 	n := &node{}
 
-	assert.PanicsWithError(t, `mino: pattern should start with /: "ping"`, func() {
+	ast.PanicsWithError(`mino: pattern should start with /: "ping"`, func() {
 		n.addRoute("ping", noop)
 	})
 
 	n.addRoute("/api", noop)
-	assert.PanicsWithError(t, `mino: duplicate route "/api": conflicts with registered pattern "/api"`, func() {
+	ast.PanicsWithError(`mino: duplicate route "/api": conflicts with registered pattern "/api"`, func() {
 		n.addRoute("/api", noop)
 	})
 }
 
 func TestInsertEmpty(t *testing.T) {
+	ast := assert.New(t)
 	n := &node{}
-	assert.Same(t, n, n.insert(""))
+	ast.Same(n, n.insert(""))
 }
 
 func TestAddSubRoute(t *testing.T) {
+	ast := assert.New(t)
 	n := &node{}
 	n.addSubRoute("/api", noop)
 
 	ep, full := n.search("/api", nil)
-	if assert.NotNil(t, ep) {
-		assert.True(t, ep.subroute)
-		assert.True(t, full)
+	if ast.NotNil(ep) {
+		ast.True(ep.subroute)
+		ast.True(full)
 	}
 
 	ep, full = n.search("/api/users", nil)
-	if assert.NotNil(t, ep) {
-		assert.True(t, ep.internal)
-		assert.False(t, full)
+	if ast.NotNil(ep) {
+		ast.True(ep.internal)
+		ast.False(full)
 	}
 
-	assert.PanicsWithError(t, `mino: duplicate route at mount prefix "/api": conflicts with registered pattern "/api"`, func() {
+	ast.PanicsWithError(`mino: duplicate route at mount prefix "/api": conflicts with registered pattern "/api"`, func() {
 		n.addSubRoute("/api", noop)
 	})
 }
 
 func TestAddSubRouteRoot(t *testing.T) {
+	ast := assert.New(t)
 	n := &node{}
-	assert.PanicsWithError(t, `mino: invalid mount prefix "api": pattern should start with /`, func() {
+	ast.PanicsWithError(`mino: invalid mount prefix "api": pattern should start with /`, func() {
 		n.addSubRoute("api", noop)
 	})
-	assert.PanicsWithError(t, `mino: invalid mount prefix "": pattern should start with /`, func() {
+	ast.PanicsWithError(`mino: invalid mount prefix "": pattern should start with /`, func() {
 		n.addSubRoute("", noop)
 	})
 
 	n.addSubRoute("/", noop)
 
 	ep, full := n.search("/", nil)
-	if assert.NotNil(t, ep) {
-		assert.True(t, ep.subroute)
-		assert.True(t, full)
+	if ast.NotNil(ep) {
+		ast.True(ep.subroute)
+		ast.True(full)
 	}
 
 	ep, _ = n.search("/deep", nil)
-	if assert.NotNil(t, ep) {
-		assert.True(t, ep.internal)
+	if ast.NotNil(ep) {
+		ast.True(ep.internal)
 	}
 }
 
 func TestAddSubRouteConflictsWithCatchAll(t *testing.T) {
+	ast := assert.New(t)
 	// A mount prefix colliding with an existing catch-all panics too.
 	n := &node{}
 	n.addRoute("/a/{rest...}", noop)
-	assert.PanicsWithError(t,
-		`mino: duplicate route at mount prefix "/a": conflicts with registered pattern "/a/{rest...}"`,
+	ast.PanicsWithError(`mino: duplicate route at mount prefix "/a": conflicts with registered pattern "/a/{rest...}"`,
 		func() { n.addSubRoute("/a", noop) })
 }
 
 func TestRoutes(t *testing.T) {
+	ast := assert.New(t)
 	ping := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ping"))
 	})
@@ -143,29 +148,29 @@ func TestRoutes(t *testing.T) {
 	}
 
 	routes := n.routes("", http.MethodGet, "")
-	assert.Len(t, routes, 3)
+	ast.Len(routes, 3)
 
 	byPattern := index(routes)
 
-	if r, ok := byPattern["/ping"]; assert.True(t, ok) {
-		assert.Equal(t, http.MethodGet, r.Method)
+	if r, ok := byPattern["/ping"]; ast.True(ok) {
+		ast.Equal(http.MethodGet, r.Method)
 		w := httptest.NewRecorder()
 		r.Handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/ping", nil))
-		assert.Equal(t, "ping", w.Body.String())
+		ast.Equal("ping", w.Body.String())
 	}
-	if r, ok := byPattern["/api/users"]; assert.True(t, ok) {
+	if r, ok := byPattern["/api/users"]; ast.True(ok) {
 		w := httptest.NewRecorder()
 		r.Handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/users", nil))
-		assert.Equal(t, "users", w.Body.String())
+		ast.Equal("users", w.Body.String())
 	}
-	if r, ok := byPattern["/api"]; assert.True(t, ok) {
-		assert.Nil(t, r.Handler)
-		assert.Equal(t, sub, r.SubRoutes)
+	if r, ok := byPattern["/api"]; ast.True(ok) {
+		ast.Nil(r.Handler)
+		ast.Equal(sub, r.SubRoutes)
 	}
 
 	byPattern = index(n.routes("", http.MethodGet, "/api"))
 	for _, pattern := range []string{"/", "/ping", "/users"} {
-		assert.Contains(t, byPattern, pattern)
+		ast.Contains(byPattern, pattern)
 	}
 }
 
@@ -201,32 +206,34 @@ func TestSearchRoute(t *testing.T) {
 		{path: "/missing"},
 	}
 
-	for _, test := range tests {
-		t.Run(test.path, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			ast := assert.New(t)
 			n := &node{}
 			for _, pattern := range patterns {
 				n.addRoute(pattern, noop)
 			}
 
 			values := make([]string, 16)
-			ep, full := n.search(test.path, values)
-			if test.want == "" {
-				assert.Nil(t, ep)
+			ep, full := n.search(tt.path, values)
+			if tt.want == "" {
+				ast.Nil(ep)
 				return
 			}
-			if !assert.NotNil(t, ep) {
+			if !ast.NotNil(ep) {
 				return
 			}
-			assert.Equal(t, test.want, ep.pattern)
-			assert.Equal(t, test.full, full)
-			for i, param := range test.params {
-				assert.Equal(t, param, values[i])
+			ast.Equal(tt.want, ep.pattern)
+			ast.Equal(tt.full, full)
+			for i, param := range tt.params {
+				ast.Equal(param, values[i])
 			}
 		})
 	}
 }
 
 func TestSearchSubrouteCatchAll(t *testing.T) {
+	ast := assert.New(t)
 	n := &node{}
 	n.addSubRoute("/api", noop)
 	n.addRoute("/api/{id}/x", noop)
@@ -236,34 +243,36 @@ func TestSearchSubrouteCatchAll(t *testing.T) {
 	// After the parameter branch is exhausted, fall back to the
 	// mounted catch-all on the same node.
 	ep, full := n.search("/api/52/rest", values)
-	if assert.NotNil(t, ep) {
-		assert.True(t, ep.internal)
-		assert.False(t, full)
+	if ast.NotNil(ep) {
+		ast.True(ep.internal)
+		ast.False(full)
 	}
 
 	// A hit on the parameter branch's child wins over the catch-all.
 	ep, full = n.search("/api/52/x", values)
-	if assert.NotNil(t, ep) {
-		assert.False(t, ep.internal)
-		assert.True(t, full)
-		assert.Equal(t, "52", values[0])
+	if ast.NotNil(ep) {
+		ast.False(ep.internal)
+		ast.True(full)
+		ast.Equal("52", values[0])
 	}
 }
 
 func TestSearchRejectsBarePath(t *testing.T) {
+	ast := assert.New(t)
 	n := &node{}
 	n.addRoute("/ping", noop)
 
 	ep, full := n.search("", nil)
-	assert.Nil(t, ep)
-	assert.False(t, full)
+	ast.Nil(ep)
+	ast.False(full)
 
 	ep, full = n.search("ping", nil)
-	assert.Nil(t, ep)
-	assert.False(t, full)
+	ast.Nil(ep)
+	ast.False(full)
 }
 
 func TestRouteHandler(t *testing.T) {
+	ast := assert.New(t)
 	var order []string
 
 	base := http.NotFoundHandler()
@@ -275,27 +284,29 @@ func TestRouteHandler(t *testing.T) {
 	h, mws := routeHandler(outer)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	ast.Equal(http.StatusNotFound, w.Code)
 
 	final := chain.New(mws...).Then(echo("handler"))
 	w = httptest.NewRecorder()
 	final.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
 
-	assert.Equal(t, []string{"outer", "inner"}, order)
-	assert.Equal(t, "handler", w.Body.String())
+	ast.Equal([]string{"outer", "inner"}, order)
+	ast.Equal("handler", w.Body.String())
 }
 
 func TestParsePattern(t *testing.T) {
-	assert.Equal(t, []string{"id"}, parsePattern("/api/{id}"))
-	assert.Equal(t, []string{"a", "b"}, parsePattern("/{a}/{b}"))
-	assert.Empty(t, parsePattern("/api/users"))
-	assert.PanicsWithError(t, `mino: invalid pattern "/{a}/{a}": parameter "a" is repeated`, func() {
+	ast := assert.New(t)
+	ast.Equal([]string{"id"}, parsePattern("/api/{id}"))
+	ast.Equal([]string{"a", "b"}, parsePattern("/{a}/{b}"))
+	ast.Empty(parsePattern("/api/users"))
+	ast.PanicsWithError(`mino: invalid pattern "/{a}/{a}": parameter "a" is repeated`, func() {
 		parsePattern("/{a}/{a}")
 	})
 }
 
 func TestRoutePatternDiagnostics(t *testing.T) {
-	for _, test := range []struct {
+	ast := assert.New(t)
+	for _, tt := range []struct {
 		pattern string
 		err     string
 	}{
@@ -305,9 +316,10 @@ func TestRoutePatternDiagnostics(t *testing.T) {
 		{"/{id}/{id}", `mino: invalid pattern "GET /{id}/{id}": parameter "id" is repeated`},
 		{"/{1id}", `mino: invalid pattern "GET /{1id}": segment "{1id}" has an invalid parameter name; use a letter or underscore first, followed by letters, digits, or underscores`},
 	} {
-		t.Run(test.pattern, func(t *testing.T) {
-			assert.PanicsWithError(t, test.err, func() {
-				NewMux().Get(test.pattern, noop)
+		t.Run(tt.pattern, func(t *testing.T) {
+			ast := assert.New(t)
+			ast.PanicsWithError(tt.err, func() {
+				NewMux().Get(tt.pattern, noop)
 			})
 		})
 	}
@@ -315,7 +327,7 @@ func TestRoutePatternDiagnostics(t *testing.T) {
 	// Segment validation runs before registration; duplicates fail afterwards.
 	m := NewMux()
 	m.Get("/users/{id}", noop)
-	assert.PanicsWithError(t, `mino: duplicate route "GET /users/{name}": conflicts with registered pattern "GET /users/{id}"`, func() {
+	ast.PanicsWithError(`mino: duplicate route "GET /users/{name}": conflicts with registered pattern "GET /users/{id}"`, func() {
 		m.Get("/users/{name}", noop)
 	})
 }
@@ -339,18 +351,19 @@ func TestParseSegment(t *testing.T) {
 		{name: "digit first", segment: "{1x}", panics: true},
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			pattern := "/" + test.segment
-			if test.panics {
-				assert.Panics(t, func() {
-					parseSegment(pattern, test.segment, test.last)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			pattern := "/" + tt.segment
+			if tt.panics {
+				ast.Panics(func() {
+					parseSegment(pattern, tt.segment, tt.last)
 				})
 				return
 			}
-			typ, param := parseSegment(pattern, test.segment, test.last)
-			assert.Equal(t, test.typ, typ)
-			assert.Equal(t, test.param, param)
+			typ, param := parseSegment(pattern, tt.segment, tt.last)
+			ast.Equal(tt.typ, typ)
+			ast.Equal(tt.param, param)
 		})
 	}
 }
@@ -368,9 +381,10 @@ func TestValidWildcardName(t *testing.T) {
 		{"digit later", "id2", true},
 		{"mixed", "user_id2", true},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.valid, validWildcardName(test.in))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			ast.Equal(tt.valid, validWildcardName(tt.in))
 		})
 	}
 }
@@ -387,9 +401,10 @@ func TestPatternToPath(t *testing.T) {
 		{"base exact", "GET /api", "/api", "/"},
 		{"outside base", "GET /other", "/api", "/other"},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.want, patternToPath(test.pattern, test.basePath))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			ast.Equal(tt.want, patternToPath(tt.pattern, tt.basePath))
 		})
 	}
 }

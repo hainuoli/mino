@@ -192,11 +192,12 @@ func routeTableOrders(patterns []string) [][]string {
 }
 
 func checkLegalRouteTable(t *testing.T, patterns []string, requests []requestSpec) {
+	ast := assert.New(t)
 	t.Helper()
 	for _, order := range routeTableOrders(patterns) {
 		m := NewMux(WithCleanPathRedirect(), WithEscapedPathMatching(), WithTrailingSlashRedirect())
 		standard := http.NewServeMux()
-		if !assert.NotPanics(t, func() {
+		if !ast.NotPanics(func() {
 			for _, pattern := range order {
 				h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("X-Route", pattern)
@@ -221,20 +222,20 @@ func checkLegalRouteTable(t *testing.T, patterns []string, requests []requestSpe
 		wantPatterns := slices.Clone(order)
 		slices.Sort(wantPatterns)
 		slices.Sort(visible)
-		if !assert.Equal(t, wantPatterns, visible, "public routes: %q", order) {
+		if !ast.Equal(wantPatterns, visible, "public routes: %q", order) {
 			return
 		}
 		for _, request := range requests {
 			want := observeRouting(standard, request.method, request.target, request.host)
 			got := observeRouting(m, request.method, request.target, request.host)
-			if !assert.Equal(t, want, got, "ServeHTTP: table=%q request=%+v", order, request) {
+			if !ast.Equal(want, got, "ServeHTTP: table=%q request=%+v", order, request) {
 				return
 			}
 			r := request.request()
 			before := r.Clone(r.Context())
 			gotHandler, gotPattern := m.Handler(r)
 			wantHandler, wantPattern := standard.Handler(before)
-			if !assert.Equal(t, before, r, "Handler changed request: table=%q request=%+v", order, request) {
+			if !ast.Equal(before, r, "Handler changed request: table=%q request=%+v", order, request) {
 				return
 			}
 			w, wantW := httptest.NewRecorder(), httptest.NewRecorder()
@@ -262,24 +263,24 @@ func checkLegalRouteTable(t *testing.T, patterns []string, requests []requestSpe
 					}
 					return path
 				}
-				if !assert.Equal(t, http.StatusTemporaryRedirect, w.Code, "Handler redirect status: table=%q request=%+v", order, request) ||
-					!assert.True(t, wantW.Code == http.StatusMovedPermanently || wantW.Code == http.StatusTemporaryRedirect,
+				if !ast.Equal(http.StatusTemporaryRedirect, w.Code, "Handler redirect status: table=%q request=%+v", order, request) ||
+					!ast.True(wantW.Code == http.StatusMovedPermanently || wantW.Code == http.StatusTemporaryRedirect,
 						"Handler redirect status: table=%q request=%+v ServeMux %d", order, request, wantW.Code) {
 					return
 				}
-				if !assert.Equal(t, target(wantW.Header().Get("Location")), target(w.Header().Get("Location")), "Handler redirect target: table=%q request=%+v", order, request) {
+				if !ast.Equal(target(wantW.Header().Get("Location")), target(w.Header().Get("Location")), "Handler redirect target: table=%q request=%+v", order, request) {
 					return
 				}
-				assert.True(t, wantPattern == gotPattern || strings.HasPrefix(wantPattern, "/"),
+				ast.True(wantPattern == gotPattern || strings.HasPrefix(wantPattern, "/"),
 					"Handler pattern: table=%q request=%+v", order, request)
 				return
 			}
-			if !assert.Equal(t, wantPattern, gotPattern, "Handler pattern: table=%q request=%+v", order, request) {
+			if !ast.Equal(wantPattern, gotPattern, "Handler pattern: table=%q request=%+v", order, request) {
 				return
 			}
 			got = observedResponse{w.Code, w.Header(), w.Body.String(), r.Pattern, nil}
 			want = observedResponse{wantW.Code, wantW.Header(), wantW.Body.String(), before.Pattern, nil}
-			if !assert.Equal(t, want, got, "Handler response: table=%q request=%+v", order, request) {
+			if !ast.Equal(want, got, "Handler response: table=%q request=%+v", order, request) {
 				return
 			}
 		}
@@ -287,6 +288,7 @@ func checkLegalRouteTable(t *testing.T, patterns []string, requests []requestSpe
 }
 
 func TestMuxDispatch(t *testing.T) {
+	ast := assert.New(t)
 	var pattern string
 	m := NewMux()
 	m.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
@@ -296,12 +298,13 @@ func TestMuxDispatch(t *testing.T) {
 
 	w := serve(m, http.MethodGet, "/ping")
 
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "pong", w.Body.String())
-	assert.Equal(t, "GET /ping", pattern)
+	ast.Equal(http.StatusOK, w.Code)
+	ast.Equal("pong", w.Body.String())
+	ast.Equal("GET /ping", pattern)
 }
 
 func TestMuxPathParam(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
 	m.Get("/api/{uid}", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(r.PathValue("uid")))
@@ -309,20 +312,22 @@ func TestMuxPathParam(t *testing.T) {
 
 	w := serve(m, http.MethodGet, "/api/42")
 
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "42", w.Body.String())
+	ast.Equal(http.StatusOK, w.Code)
+	ast.Equal("42", w.Body.String())
 }
 
 func TestMuxStaticWinsOverParam(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
 	m.Get("/api/users", echo("users"))
 	m.Get("/api/{id}", echo("id"))
 
-	assert.Equal(t, "users", serve(m, http.MethodGet, "/api/users").Body.String())
-	assert.Equal(t, "id", serve(m, http.MethodGet, "/api/42").Body.String())
+	ast.Equal("users", serve(m, http.MethodGet, "/api/users").Body.String())
+	ast.Equal("id", serve(m, http.MethodGet, "/api/42").Body.String())
 }
 
 func TestMuxManyParams(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
 	pattern := "/{p1}/{p2}/{p3}/{p4}/{p5}/{p6}/{p7}/{p8}/{p9}/{p10}/{p11}/{p12}/{p13}/{p14}/{p15}/{p16}/{p17}"
 	m.Get(pattern, func(w http.ResponseWriter, r *http.Request) {
@@ -334,11 +339,12 @@ func TestMuxManyParams(t *testing.T) {
 	})
 
 	w := serve(m, http.MethodGet, "/1/2/3/4/5/6/7/8/9/10/11/12/13/14/15/16/17")
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17", w.Body.String())
+	ast.Equal(http.StatusOK, w.Code)
+	ast.Equal("1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17", w.Body.String())
 }
 
 func TestMuxVerbs(t *testing.T) {
+	ast := assert.New(t)
 	tests := []struct {
 		method   string
 		register func(*Mux, string, func(http.ResponseWriter, *http.Request))
@@ -353,12 +359,13 @@ func TestMuxVerbs(t *testing.T) {
 		{http.MethodOptions, (*Mux).Options},
 		{http.MethodTrace, (*Mux).Trace},
 	}
-	for _, test := range tests {
-		t.Run(test.method, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.method, func(t *testing.T) {
+			ast := assert.New(t)
 			m := NewMux()
-			test.register(m, "/ping", echo("pong"))
+			tt.register(m, "/ping", echo("pong"))
 
-			assert.Equal(t, "pong", serve(m, test.method, "/ping").Body.String())
+			ast.Equal("pong", serve(m, tt.method, "/ping").Body.String())
 		})
 	}
 
@@ -366,20 +373,22 @@ func TestMuxVerbs(t *testing.T) {
 	m.HandleFunc("GET /hi", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("hi"))
 	})
-	assert.Equal(t, "hi", serve(m, http.MethodGet, "/hi").Body.String())
+	ast.Equal("hi", serve(m, http.MethodGet, "/hi").Body.String())
 }
 
 func TestMuxTokenMethod(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
 	m.Handle("V2 /ping", echo("v2"))
 
-	assert.Equal(t, "v2", serve(m, "V2", "/ping").Body.String())
-	assert.Equal(t, "V2", m.Routes()[0].Method)
+	ast.Equal("v2", serve(m, "V2", "/ping").Body.String())
+	ast.Equal("V2", m.Routes()[0].Method)
 }
 
 func TestMuxAnyMethodPrecedence(t *testing.T) {
 	for _, genericFirst := range []bool{false, true} {
 		t.Run(fmt.Sprintf("genericFirst=%t", genericFirst), func(t *testing.T) {
+			ast := assert.New(t)
 			m := NewMux()
 			if genericFirst {
 				m.Handle("/ping", echo("generic"))
@@ -388,14 +397,15 @@ func TestMuxAnyMethodPrecedence(t *testing.T) {
 			if !genericFirst {
 				m.Handle("/ping", echo("generic"))
 			}
-			assert.Equal(t, "get", serve(m, http.MethodGet, "/ping").Body.String())
-			assert.Equal(t, "get", serve(m, http.MethodHead, "/ping").Body.String())
-			assert.Equal(t, "generic", serve(m, http.MethodPost, "/ping").Body.String())
+			ast.Equal("get", serve(m, http.MethodGet, "/ping").Body.String())
+			ast.Equal("get", serve(m, http.MethodHead, "/ping").Body.String())
+			ast.Equal("generic", serve(m, http.MethodPost, "/ping").Body.String())
 		})
 	}
 }
 
 func TestMuxUseOrder(t *testing.T) {
+	ast := assert.New(t)
 	var order []string
 
 	m := NewMux()
@@ -406,23 +416,24 @@ func TestMuxUseOrder(t *testing.T) {
 
 	serve(m, http.MethodGet, "/ping")
 
-	assert.Equal(t, []string{"first", "second", "handler"}, order)
+	ast.Equal([]string{"first", "second", "handler"}, order)
 }
 
 func TestMuxUsePanics(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
-	assert.PanicsWithError(t, "mino: Use middleware[0] is nil", func() {
+	ast.PanicsWithError("mino: Use middleware[0] is nil", func() {
 		m.Use(nil)
 	})
 
 	m.Get("/ping", echo("pong"))
-	assert.PanicsWithError(t, "mino: Use middleware[1] is nil", func() {
+	ast.PanicsWithError("mino: Use middleware[1] is nil", func() {
 		m.Use(func(next http.Handler) http.Handler { return next }, nil)
 	})
-	assert.Empty(t, m.Middlewares(), "invalid Use must not append a partial stack")
-	assert.Equal(t, "pong", serve(m, http.MethodGet, "/ping").Body.String())
+	ast.Empty(m.Middlewares(), "invalid Use must not append a partial stack")
+	ast.Equal("pong", serve(m, http.MethodGet, "/ping").Body.String())
 
-	assert.PanicsWithError(t, "mino: middleware returned nil handler", func() {
+	ast.PanicsWithError("mino: middleware returned nil handler", func() {
 		NewMux().Use(func(http.Handler) http.Handler { return nil })
 	})
 }
@@ -430,6 +441,7 @@ func TestMuxUsePanics(t *testing.T) {
 func TestMuxEmptyMiddleware(t *testing.T) {
 	for _, nested := range []bool{false, true} {
 		t.Run(fmt.Sprintf("nested=%t", nested), func(t *testing.T) {
+			ast := assert.New(t)
 			var calls []string
 			m := NewMux()
 			m.Use(tracer("root", &calls))
@@ -446,21 +458,21 @@ func TestMuxEmptyMiddleware(t *testing.T) {
 			for range 2 {
 				calls = nil
 				w := serve(m, http.MethodGet, path)
-				assert.Equal(t, http.StatusNotFound, w.Code)
-				assert.Equal(t, "404 page not found\n", w.Body.String())
-				assert.Equal(t, wantCalls, calls)
+				ast.Equal(http.StatusNotFound, w.Code)
+				ast.Equal("404 page not found\n", w.Body.String())
+				ast.Equal(wantCalls, calls)
 			}
 			// Resolve the current local or inherited fallback on every request.
 			m.NotFound(echo("parent"))
-			assert.Equal(t, "parent", serve(m, http.MethodGet, path).Body.String())
+			ast.Equal("parent", serve(m, http.MethodGet, path).Body.String())
 			target.NotFound(echo("local"))
-			assert.Equal(t, "local", serve(m, http.MethodGet, path).Body.String())
+			ast.Equal("local", serve(m, http.MethodGet, path).Body.String())
 			target.NotFound(nil)
 			wantBody := "404 page not found\n"
 			if nested {
 				wantBody = "parent"
 			}
-			assert.Equal(t, wantBody, serve(m, http.MethodGet, path).Body.String())
+			ast.Equal(wantBody, serve(m, http.MethodGet, path).Body.String())
 		})
 	}
 }
@@ -468,6 +480,7 @@ func TestMuxEmptyMiddleware(t *testing.T) {
 func TestMuxEmptyMiddlewareConcurrent(t *testing.T) {
 	for _, nested := range []bool{false, true} {
 		t.Run(fmt.Sprintf("nested=%t", nested), func(t *testing.T) {
+			ast := assert.New(t)
 			var called atomic.Int32
 			var built atomic.Int32
 			mw := func(next http.Handler) http.Handler {
@@ -486,19 +499,19 @@ func TestMuxEmptyMiddlewareConcurrent(t *testing.T) {
 				path = "/api/missing"
 				layers++
 			}
-			assert.Equal(t, layers, built.Load())
+			ast.Equal(layers, built.Load())
 			var wg sync.WaitGroup
 			for range 32 {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
 					w := serve(m, http.MethodGet, path)
-					assert.Equal(t, http.StatusNotFound, w.Code)
+					ast.Equal(http.StatusNotFound, w.Code)
 				}()
 			}
 			wg.Wait()
-			assert.Equal(t, 32*layers, called.Load())
-			assert.Equal(t, layers, built.Load(), "concurrent requests must not rebuild middleware")
+			ast.Equal(32*layers, called.Load())
+			ast.Equal(layers, built.Load(), "concurrent requests must not rebuild middleware")
 		})
 	}
 }
@@ -529,6 +542,7 @@ func TestMuxUseAfterRegistration(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			ast := assert.New(t)
 			m := NewMux()
 			m.Use(marker("first"))
 			path := configure(m)
@@ -543,10 +557,10 @@ func TestMuxUseAfterRegistration(t *testing.T) {
 				{http.MethodGet, path + "/missing", http.StatusNotFound},
 			} {
 				w := serve(m, request.method, request.path)
-				assert.Equal(t, request.status, w.Code)
-				assert.Equal(t, []string{"first", "second"}, w.Header().Values("X-Chain"))
+				ast.Equal(request.status, w.Code)
+				ast.Equal([]string{"first", "second"}, w.Header().Values("X-Chain"))
 				if request.status == http.StatusMethodNotAllowed {
-					assert.Equal(t, "GET, HEAD", w.Header().Get("Allow"))
+					ast.Equal("GET, HEAD", w.Header().Get("Allow"))
 				}
 			}
 		})
@@ -557,6 +571,7 @@ func TestMuxMiddlewareLifecycle(t *testing.T) {
 	for _, nested := range []bool{false, true} {
 		for _, registered := range []bool{false, true} {
 			t.Run(fmt.Sprintf("nested=%t/registered=%t", nested, registered), func(t *testing.T) {
+				ast := assert.New(t)
 				m := NewMux()
 				var target Router = m
 				path := "/ping"
@@ -574,7 +589,7 @@ func TestMuxMiddlewareLifecycle(t *testing.T) {
 						next.ServeHTTP(w, r)
 					})
 				})
-				assert.Equal(t, 1, builds, "Use builds middleware before any requests")
+				ast.Equal(1, builds, "Use builds middleware before any requests")
 				target.Use()
 				target.With()
 				if registered {
@@ -583,14 +598,14 @@ func TestMuxMiddlewareLifecycle(t *testing.T) {
 				target.NotFound(echo("fallback"))
 				for i := 1; i <= 2; i++ {
 					w := serve(m, http.MethodGet, path)
-					assert.Equal(t, fmt.Sprint(i), w.Header().Get("X-Requests"))
+					ast.Equal(fmt.Sprint(i), w.Header().Get("X-Requests"))
 					want := "fallback"
 					if registered {
 						want = "pong"
 					}
-					assert.Equal(t, want, w.Body.String())
+					ast.Equal(want, w.Body.String())
 				}
-				assert.Equal(t, 1, builds, "registration and serving must reuse middleware state")
+				ast.Equal(1, builds, "registration and serving must reuse middleware state")
 			})
 		}
 	}
@@ -614,7 +629,7 @@ func TestMuxWithMiddlewareSnapshots(t *testing.T) {
 	m.Use(marker("root"))
 	m.Get("/public", echo("public"))
 
-	for _, test := range []struct {
+	for _, tt := range []struct {
 		method string
 		path   string
 		chain  []string
@@ -628,9 +643,10 @@ func TestMuxWithMiddlewareSnapshots(t *testing.T) {
 		{http.MethodPost, "/before", []string{"root", "view"}},
 		{http.MethodGet, "/public", []string{"root"}},
 	} {
-		t.Run(test.method+test.path, func(t *testing.T) {
-			w := serve(m, test.method, test.path)
-			assert.Equal(t, test.chain, w.Header().Values("X-Chain"))
+		t.Run(tt.method+tt.path, func(t *testing.T) {
+			ast := assert.New(t)
+			w := serve(m, tt.method, tt.path)
+			ast.Equal(tt.chain, w.Header().Values("X-Chain"))
 		})
 	}
 }
@@ -649,7 +665,7 @@ func TestMuxEntryBoundaries(t *testing.T) {
 	sub.Use(marker("sub"))
 	m.Mount("/sub", sub)
 
-	for _, test := range []struct {
+	for _, tt := range []struct {
 		name  string
 		entry http.Handler
 		path  string
@@ -664,16 +680,18 @@ func TestMuxEntryBoundaries(t *testing.T) {
 		{"inline is not an entry wrapper", view, "/outside", "parent 404", []string{"root"}},
 		{"mount does not inherit fallback", m, "/sub/missing", "404 page not found\n", []string{"root", "sub"}},
 	} {
-		t.Run(test.name, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
 			w := httptest.NewRecorder()
-			test.entry.ServeHTTP(w, httptest.NewRequest(http.MethodGet, test.path, nil))
-			assert.Equal(t, test.body, w.Body.String())
-			assert.Equal(t, test.chain, w.Header().Values("X-Chain"))
+			tt.entry.ServeHTTP(w, httptest.NewRequest(http.MethodGet, tt.path, nil))
+			ast.Equal(tt.body, w.Body.String())
+			ast.Equal(tt.chain, w.Header().Values("X-Chain"))
 		})
 	}
 }
 
 func TestMuxWithIsolation(t *testing.T) {
+	ast := assert.New(t)
 	var order []string
 
 	m := NewMux()
@@ -681,15 +699,16 @@ func TestMuxWithIsolation(t *testing.T) {
 	api.Get("/profile", echo("profile"))
 	m.Get("/login", echo("login"))
 
-	assert.Equal(t, "profile", serve(m, http.MethodGet, "/profile").Body.String())
-	assert.Equal(t, []string{"auth"}, order)
+	ast.Equal("profile", serve(m, http.MethodGet, "/profile").Body.String())
+	ast.Equal([]string{"auth"}, order)
 
 	order = nil
-	assert.Equal(t, "login", serve(m, http.MethodGet, "/login").Body.String())
-	assert.Empty(t, order)
+	ast.Equal("login", serve(m, http.MethodGet, "/login").Body.String())
+	ast.Empty(order)
 }
 
 func TestMuxNestedWith(t *testing.T) {
+	ast := assert.New(t)
 	var order []string
 
 	m := NewMux()
@@ -698,19 +717,20 @@ func TestMuxNestedWith(t *testing.T) {
 	deep.Get("/deep", echo("deep"))
 	m.Get("/plain", echo("plain"))
 
-	assert.PanicsWithError(t, "mino: With middleware[0] is nil", func() {
+	ast.PanicsWithError("mino: With middleware[0] is nil", func() {
 		m.With(nil)
 	})
 
-	assert.Equal(t, "deep", serve(m, http.MethodGet, "/deep").Body.String())
-	assert.Equal(t, []string{"auth", "deep"}, order)
+	ast.Equal("deep", serve(m, http.MethodGet, "/deep").Body.String())
+	ast.Equal([]string{"auth", "deep"}, order)
 
 	order = nil
-	assert.Equal(t, "plain", serve(m, http.MethodGet, "/plain").Body.String())
-	assert.Empty(t, order)
+	ast.Equal("plain", serve(m, http.MethodGet, "/plain").Body.String())
+	ast.Empty(order)
 }
 
 func TestMuxRouteOnInline(t *testing.T) {
+	ast := assert.New(t)
 	var order []string
 
 	m := NewMux()
@@ -718,49 +738,53 @@ func TestMuxRouteOnInline(t *testing.T) {
 	g := api.Route("/g")
 	g.Get("/ping", echo("grouped"))
 
-	assert.Equal(t, "grouped", serve(m, http.MethodGet, "/g/ping").Body.String())
-	assert.Equal(t, []string{"auth"}, order)
+	ast.Equal("grouped", serve(m, http.MethodGet, "/g/ping").Body.String())
+	ast.Equal([]string{"auth"}, order)
 }
 
 func TestMuxRoutePrefix(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
-	assert.PanicsWithError(t, `mino: invalid prefix "": Route and Mount require a path beginning with '/'`, func() {
+	ast.PanicsWithError(`mino: invalid prefix "": Route and Mount require a path beginning with '/'`, func() {
 		m.Route("")
 	})
-	assert.PanicsWithError(t, `mino: invalid prefix "api": Route and Mount require a path beginning with '/'`, func() {
+	ast.PanicsWithError(`mino: invalid prefix "api": Route and Mount require a path beginning with '/'`, func() {
 		m.Route("api")
 	})
-	assert.PanicsWithError(t, `mino: invalid prefix "/{a}": Route and Mount require a literal prefix without parameters`, func() {
+	ast.PanicsWithError(`mino: invalid prefix "/{a}": Route and Mount require a literal prefix without parameters`, func() {
 		m.Route("/{a}")
 	})
 
 	g := m.Route("/api/")
 	g.Get("/ping", echo("pong"))
-	assert.Equal(t, "pong", serve(m, http.MethodGet, "/api/ping").Body.String())
+	ast.Equal("pong", serve(m, http.MethodGet, "/api/ping").Body.String())
 
 	m.Route("//").Get("/ping", echo("pong"))
 }
 
 func TestMuxRouteGroup(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
 	api := m.Route("/api")
 	api.Get("/ping", echo("api pong"))
 	m.Get("/ping", echo("pong"))
 
-	assert.Equal(t, "api pong", serve(m, http.MethodGet, "/api/ping").Body.String())
-	assert.Equal(t, "pong", serve(m, http.MethodGet, "/ping").Body.String())
+	ast.Equal("api pong", serve(m, http.MethodGet, "/api/ping").Body.String())
+	ast.Equal("pong", serve(m, http.MethodGet, "/ping").Body.String())
 }
 
 func TestMuxRouteNested(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
 	api := m.Route("/api")
 	root := api.Route("/")
 	root.Get("/ping", echo("root"))
 
-	assert.Equal(t, "root", serve(m, http.MethodGet, "/api/ping").Body.String())
+	ast.Equal("root", serve(m, http.MethodGet, "/api/ping").Body.String())
 }
 
 func TestMuxMount(t *testing.T) {
+	ast := assert.New(t)
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(r.URL.Path))
 	})
@@ -769,10 +793,10 @@ func TestMuxMount(t *testing.T) {
 	m.Mount("/sub", inner)
 
 	w := serve(m, http.MethodGet, "/sub/hello")
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "/hello", w.Body.String())
+	ast.Equal(http.StatusOK, w.Code)
+	ast.Equal("/hello", w.Body.String())
 
-	assert.PanicsWithError(t, `mino: nil mount handler for prefix "/x"`, func() {
+	ast.PanicsWithError(`mino: nil mount handler for prefix "/x"`, func() {
 		m.Mount("/x", nil)
 	})
 }
@@ -783,27 +807,30 @@ func TestMuxMountPaths(t *testing.T) {
 	})
 
 	t.Run("root keeps full path", func(t *testing.T) {
+		ast := assert.New(t)
 		m := NewMux()
 		m.Mount("/", writePath)
 
-		assert.Equal(t, "/any", serve(m, http.MethodGet, "/any").Body.String())
-		assert.Equal(t, "/", serve(m, http.MethodGet, "/").Body.String())
+		ast.Equal("/any", serve(m, http.MethodGet, "/any").Body.String())
+		ast.Equal("/", serve(m, http.MethodGet, "/").Body.String())
 	})
 
 	t.Run("nil handler func", func(t *testing.T) {
+		ast := assert.New(t)
 		m := NewMux()
-		assert.PanicsWithError(t, `mino: nil mount handler for prefix "/x"`, func() {
+		ast.PanicsWithError(`mino: nil mount handler for prefix "/x"`, func() {
 			m.Mount("/x", http.HandlerFunc(nil))
 		})
 	})
 
 	t.Run("raw path", func(t *testing.T) {
+		ast := assert.New(t)
 		m := NewMux()
 		m.Mount("/sub", writePath)
 
-		assert.Equal(t, "/", serve(m, http.MethodGet, "/sub").Body.String())
-		assert.Equal(t, "/a", serve(m, http.MethodGet, "/sub%2Fa").Body.String())
-		assert.Equal(t, "/x", serve(m, http.MethodGet, "/%73ub/x").Body.String())
+		ast.Equal("/", serve(m, http.MethodGet, "/sub").Body.String())
+		ast.Equal("/a", serve(m, http.MethodGet, "/sub%2Fa").Body.String())
+		ast.Equal("/x", serve(m, http.MethodGet, "/%73ub/x").Body.String())
 	})
 }
 
@@ -811,6 +838,7 @@ func TestMuxMountParameterPrecedence(t *testing.T) {
 	for _, anyMethod := range []bool{false, true} {
 		for _, mountFirst := range []bool{false, true} {
 			t.Run(fmt.Sprintf("any=%t/mountFirst=%t", anyMethod, mountFirst), func(t *testing.T) {
+				ast := assert.New(t)
 				m := NewMux()
 				sub := NewMux()
 				sub.Get("/extra/info", echo("mounted"))
@@ -825,14 +853,15 @@ func TestMuxMountParameterPrecedence(t *testing.T) {
 				if !mountFirst {
 					m.Mount("/api", sub)
 				}
-				assert.Equal(t, "parameter", serve(m, http.MethodGet, "/api/42").Body.String())
-				assert.Equal(t, "mounted", serve(m, http.MethodGet, "/api/extra/info").Body.String())
+				ast.Equal("parameter", serve(m, http.MethodGet, "/api/42").Body.String())
+				ast.Equal("mounted", serve(m, http.MethodGet, "/api/extra/info").Body.String())
 			})
 		}
 	}
 }
 
 func TestMountEncodedSlashRemainder(t *testing.T) {
+	ast := assert.New(t)
 	// A mount prefix ending right before an encoded slash must keep that
 	// byte as the delegated path's leading separator, not segment data.
 	child := NewMux()
@@ -844,24 +873,26 @@ func TestMountEncodedSlashRemainder(t *testing.T) {
 
 	w := serve(m, http.MethodGet, "/p%2Fx")
 
-	assert.Equal(t, "/x|/x", w.Body.String())
+	ast.Equal("/x|/x", w.Body.String())
 }
 
 func TestStripPrefix(t *testing.T) {
+	ast := assert.New(t)
 	h := stripPrefix("/sub", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(r.URL.Path))
 	}))
 
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sub/deep", nil))
-	assert.Equal(t, "/deep", w.Body.String())
+	ast.Equal("/deep", w.Body.String())
 
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/other", nil))
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	ast.Equal(http.StatusNotFound, w.Code)
 }
 
 func TestStripPrefixEmptyRemainder(t *testing.T) {
+	ast := assert.New(t)
 	// RawPath equal to the prefix leaves an empty remainder; the
 	// delegated path must still be "/".
 	h := stripPrefix("/p", echo("child"))
@@ -871,103 +902,111 @@ func TestStripPrefixEmptyRemainder(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 
-	assert.Equal(t, "child", w.Body.String())
+	ast.Equal("child", w.Body.String())
 }
 
 func TestMuxHandleMethodPrefix(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
 	m.Handle("POST /only", echo("posted"))
 
-	assert.Equal(t, "posted", serve(m, http.MethodPost, "/only").Body.String())
+	ast.Equal("posted", serve(m, http.MethodPost, "/only").Body.String())
 
 	w := serve(m, http.MethodGet, "/only")
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-	assert.Equal(t, http.MethodPost, w.Header().Get("Allow"))
+	ast.Equal(http.StatusMethodNotAllowed, w.Code)
+	ast.Equal(http.MethodPost, w.Header().Get("Allow"))
 }
 
 func TestMuxHandlePanics(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
-	assert.PanicsWithError(t, `mino: invalid pattern "": a path beginning with '/' is required`, func() {
+	ast.PanicsWithError(`mino: invalid pattern "": a path beginning with '/' is required`, func() {
 		m.Handle("", echo("x"))
 	})
-	assert.PanicsWithError(t, `mino: invalid HTTP method "{bad}" in pattern "{bad} /x"`, func() {
+	ast.PanicsWithError(`mino: invalid HTTP method "{bad}" in pattern "{bad} /x"`, func() {
 		m.Handle("{bad} /x", echo("x"))
 	})
-	assert.PanicsWithError(t, `mino: invalid pattern "noslash": a path beginning with '/' is required`, func() {
+	ast.PanicsWithError(`mino: invalid pattern "noslash": a path beginning with '/' is required`, func() {
 		m.Handle("noslash", echo("x"))
 	})
-	assert.PanicsWithError(t, `mino: invalid host "{bad}" in pattern "{bad}/x": host patterns must be literal`, func() {
+	ast.PanicsWithError(`mino: invalid host "{bad}" in pattern "{bad}/x": host patterns must be literal`, func() {
 		m.Handle("{bad}/x", echo("x"))
 	})
-	assert.PanicsWithError(t, `mino: nil handler for pattern "GET /x"`, func() {
+	ast.PanicsWithError(`mino: nil handler for pattern "GET /x"`, func() {
 		m.Handle("GET /x", nil)
 	})
-	assert.PanicsWithError(t, `mino: nil handler for pattern "GET /x"`, func() {
+	ast.PanicsWithError(`mino: nil handler for pattern "GET /x"`, func() {
 		m.HandleFunc("GET /x", nil)
 	})
 }
 
 func TestMuxHandleRejectsUncleanPatternUnderPolicy(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux(WithCleanPathRedirect())
 
-	assert.PanicsWithError(t,
-		`mino: invalid pattern "GET //a": non-CONNECT path cannot match with clean-path redirects enabled`,
+	ast.PanicsWithError(`mino: invalid pattern "GET //a": non-CONNECT path cannot match with clean-path redirects enabled`,
 		func() { m.Handle("GET //a", echo("a")) })
 
 	// CONNECT paths keep their authority spelling and stay exempt.
-	assert.NotPanics(t, func() { m.Handle("CONNECT //a", echo("a")) })
+	ast.NotPanics(func() { m.Handle("CONNECT //a", echo("a")) })
 }
 
 func TestMuxConfOptions(t *testing.T) {
 	t.Run("escaped path", func(t *testing.T) {
+		ast := assert.New(t)
 		m := NewMux(WithEscapedPathMatching())
 		m.Get("/api/{uid}", func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(r.PathValue("uid")))
 		})
 
 		w := serve(m, http.MethodGet, "/api/a%2Fb")
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, "a/b", w.Body.String())
+		ast.Equal(http.StatusOK, w.Code)
+		ast.Equal("a/b", w.Body.String())
 	})
 
 	t.Run("escaped mount", func(t *testing.T) {
+		ast := assert.New(t)
 		m := NewMux(WithEscapedPathMatching())
 		m.Mount("/sub", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(r.URL.Path))
 		}))
 
-		assert.Equal(t, "/x", serve(m, http.MethodGet, "/sub/x").Body.String())
+		ast.Equal("/x", serve(m, http.MethodGet, "/sub/x").Body.String())
 	})
 
 	t.Run("escaped redirect", func(t *testing.T) {
+		ast := assert.New(t)
 		m := NewMux(WithEscapedPathMatching(), WithTrailingSlashRedirect())
 		m.Get("/a%20b/", echo("space"))
 
 		w := serve(m, http.MethodGet, "/a%20b")
-		assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
-		assert.Equal(t, "/a%20b/", w.Header().Get("Location"))
+		ast.Equal(http.StatusTemporaryRedirect, w.Code)
+		ast.Equal("/a%20b/", w.Header().Get("Location"))
 	})
 
 	t.Run("trailing slash on", func(t *testing.T) {
+		ast := assert.New(t)
 		m := NewMux(WithTrailingSlashRedirect())
 		m.Get("/tree/", echo("tree"))
 
 		w := serve(m, http.MethodGet, "/tree")
-		assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
-		assert.Equal(t, "/tree/", w.Header().Get("Location"))
+		ast.Equal(http.StatusTemporaryRedirect, w.Code)
+		ast.Equal("/tree/", w.Header().Get("Location"))
 	})
 
 	t.Run("trailing slash off", func(t *testing.T) {
+		ast := assert.New(t)
 		m := NewMux()
 		m.Get("/tree/", echo("tree"))
 
-		assert.Equal(t, http.StatusNotFound, serve(m, http.MethodGet, "/tree").Code)
+		ast.Equal(http.StatusNotFound, serve(m, http.MethodGet, "/tree").Code)
 	})
 }
 
 func TestMuxServeHTTPFallback(t *testing.T) {
+	ast := assert.New(t)
 	w := recorder(NewMux(), httptest.NewRequest(http.MethodGet, "/x", nil))
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	ast.Equal(http.StatusNotFound, w.Code)
 
 	var order []string
 	m := NewMux()
@@ -975,23 +1014,24 @@ func TestMuxServeHTTPFallback(t *testing.T) {
 	api.Get("/profile", echo("profile"))
 
 	w = recorder(m, httptest.NewRequest(http.MethodGet, "/profile", nil))
-	assert.Equal(t, "profile", w.Body.String())
+	ast.Equal("profile", w.Body.String())
 
 	w = httptest.NewRecorder()
 	order = nil
 	api.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/profile", nil))
-	assert.Equal(t, "profile", w.Body.String())
-	assert.Equal(t, []string{"auth"}, order)
+	ast.Equal("profile", w.Body.String())
+	ast.Equal([]string{"auth"}, order)
 
 	// 空路径的普通请求按 "/" 处理，CONNECT 保留空路径。
 	w = recorder(m, httptest.NewRequest(http.MethodGet, "http://example.com", nil))
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	ast.Equal(http.StatusNotFound, w.Code)
 
 	w = recorder(m, httptest.NewRequest(http.MethodConnect, "example.com:443", nil))
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	ast.Equal(http.StatusNotFound, w.Code)
 }
 
 func TestMuxHostRouting(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
 	m.Handle("example.com/api", echo("host api"))
 	m.Handle("POST example.com/only", echo("posted"))
@@ -1004,20 +1044,20 @@ func TestMuxHostRouting(t *testing.T) {
 		return recorder(m, r)
 	}
 
-	assert.Equal(t, "host ping", serveHost("api.example.com", "/ping").Body.String())
-	assert.Equal(t, "host ping", serveHost("api.example.com:8443", "/ping").Body.String())
-	assert.Equal(t, "host api", serveHost("example.com", "/api").Body.String())
-	assert.Equal(t, "plain", serveHost("other.com", "/ping").Body.String())
+	ast.Equal("host ping", serveHost("api.example.com", "/ping").Body.String())
+	ast.Equal("host ping", serveHost("api.example.com:8443", "/ping").Body.String())
+	ast.Equal("host api", serveHost("example.com", "/api").Body.String())
+	ast.Equal("plain", serveHost("other.com", "/ping").Body.String())
 
 	w := serveHost("example.com", "/only")
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-	assert.Equal(t, http.MethodPost, w.Header().Get("Allow"))
+	ast.Equal(http.StatusMethodNotAllowed, w.Code)
+	ast.Equal(http.MethodPost, w.Header().Get("Allow"))
 
 	var hosted []string
 	for _, r := range m.Routes() {
 		hosted = append(hosted, r.Host+" "+r.Method+" "+r.Pattern)
 	}
-	assert.Equal(t, []string{
+	ast.Equal([]string{
 		" GET /ping",
 		"api.example.com GET /ping",
 		"example.com  /api",
@@ -1025,6 +1065,7 @@ func TestMuxHostRouting(t *testing.T) {
 	}, hosted)
 
 	t.Run("nested", func(t *testing.T) {
+		ast := assert.New(t)
 		m := NewMux()
 		api := m.Route("/api")
 		api.Handle("example.com/ping", echo("deep"))
@@ -1032,21 +1073,23 @@ func TestMuxHostRouting(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/api/ping", nil)
 		r.Host = "example.com"
 
-		assert.Equal(t, "deep", recorder(m, r).Body.String())
+		ast.Equal("deep", recorder(m, r).Body.String())
 	})
 }
 
 func TestMuxNotFound(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
 	m.Get("/ping", echo("pong"))
 
-	assert.Equal(t, http.StatusNotFound, serve(m, http.MethodGet, "/missing").Code)
+	ast.Equal(http.StatusNotFound, serve(m, http.MethodGet, "/missing").Code)
 
 	m.NotFound(echo("custom 404"))
-	assert.Equal(t, "custom 404", serve(m, http.MethodGet, "/missing").Body.String())
+	ast.Equal("custom 404", serve(m, http.MethodGet, "/missing").Body.String())
 }
 
 func TestMuxFallbacksInline(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
 	api := m.With(func(next http.Handler) http.Handler { return next })
 	api.NotFound(nil)
@@ -1055,8 +1098,8 @@ func TestMuxFallbacksInline(t *testing.T) {
 	api.MethodNotAllowed(echo("api 405"))
 	m.Get("/ping", echo("pong"))
 
-	assert.Equal(t, "api 404", serve(m, http.MethodGet, "/missing").Body.String())
-	assert.Equal(t, "api 405", serve(m, http.MethodPost, "/ping").Body.String())
+	ast.Equal("api 404", serve(m, http.MethodGet, "/missing").Body.String())
+	ast.Equal("api 405", serve(m, http.MethodPost, "/ping").Body.String())
 }
 
 func TestMuxFallbackReset(t *testing.T) {
@@ -1075,6 +1118,7 @@ func TestMuxFallbackReset(t *testing.T) {
 		for _, mounted := range []bool{false, true} {
 			for _, depth := range []int{0, 1, 2} {
 				t.Run(fmt.Sprintf("%s/mounted=%t/inline=%d", fallback.name, mounted, depth), func(t *testing.T) {
+					ast := assert.New(t)
 					var calls []string
 					handler := func(name string) http.HandlerFunc {
 						return func(w http.ResponseWriter, r *http.Request) {
@@ -1109,9 +1153,9 @@ func TestMuxFallbackReset(t *testing.T) {
 					}
 					fallback.set(target, handler("custom"))
 					w := serve(m, fallback.method, path)
-					assert.Equal(t, fallback.status, w.Code)
-					assert.Equal(t, "custom", w.Body.String())
-					assert.Equal(t, append(customCalls, "custom"), calls)
+					ast.Equal(fallback.status, w.Code)
+					ast.Equal("custom", w.Body.String())
+					ast.Equal(append(customCalls, "custom"), calls)
 
 					// Repeated resets restore inheritance or the default response
 					// without keeping the inline middleware wrapper.
@@ -1119,15 +1163,15 @@ func TestMuxFallbackReset(t *testing.T) {
 					fallback.set(target, nil)
 					calls = nil
 					w = serve(m, fallback.method, path)
-					assert.Equal(t, fallback.status, w.Code)
-					assert.Equal(t, wantBody, w.Body.String())
+					ast.Equal(fallback.status, w.Code)
+					ast.Equal(wantBody, w.Body.String())
 					wantCalls := append([]string(nil), baseCalls...)
 					if mounted {
 						wantCalls = append(wantCalls, "inherited")
 					}
-					assert.Equal(t, wantCalls, calls)
+					ast.Equal(wantCalls, calls)
 					if fallback.status == http.StatusMethodNotAllowed {
-						assert.Equal(t, "GET, HEAD", w.Header().Get("Allow"))
+						ast.Equal("GET, HEAD", w.Header().Get("Allow"))
 					}
 				})
 			}
@@ -1136,48 +1180,53 @@ func TestMuxFallbackReset(t *testing.T) {
 }
 
 func TestMuxMethodNotAllowed(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
 	m.Get("/ping", echo("pong"))
 
 	w := serve(m, http.MethodPost, "/ping")
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-	assert.Equal(t, "GET, HEAD", w.Header().Get("Allow"))
+	ast.Equal(http.StatusMethodNotAllowed, w.Code)
+	ast.Equal("GET, HEAD", w.Header().Get("Allow"))
 
 	m.MethodNotAllowed(echo("custom 405"))
-	assert.Equal(t, "custom 405", serve(m, http.MethodPost, "/ping").Body.String())
+	ast.Equal("custom 405", serve(m, http.MethodPost, "/ping").Body.String())
 }
 
 func TestMuxHeadFallback(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
 	m.Get("/ping", echo("pong"))
 
-	assert.Equal(t, http.StatusOK, serve(m, http.MethodHead, "/ping").Code)
+	ast.Equal(http.StatusOK, serve(m, http.MethodHead, "/ping").Code)
 }
 
 func TestMuxTrailingSlashRedirect(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux(WithTrailingSlashRedirect())
 	m.Get("/tree/", echo("tree root"))
 
 	w := serve(m, http.MethodGet, "/tree")
-	assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
-	assert.Equal(t, "/tree/", w.Header().Get("Location"))
+	ast.Equal(http.StatusTemporaryRedirect, w.Code)
+	ast.Equal("/tree/", w.Header().Get("Location"))
 }
 
 func TestMuxRedirectStatus(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux(WithTrailingSlashRedirect())
 	m.Get("/tree/", echo("tree"))
 	m.Post("/tree/", echo("tree"))
 
 	w := serve(m, http.MethodPost, "/tree")
-	assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
-	assert.Equal(t, "/tree/", w.Header().Get("Location"))
+	ast.Equal(http.StatusTemporaryRedirect, w.Code)
+	ast.Equal("/tree/", w.Header().Get("Location"))
 
 	w = serve(m, http.MethodGet, "/tree?x=1")
-	assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
-	assert.Equal(t, "/tree/?x=1", w.Header().Get("Location"))
+	ast.Equal(http.StatusTemporaryRedirect, w.Code)
+	ast.Equal("/tree/?x=1", w.Header().Get("Location"))
 }
 
 func TestMuxCleanPathRedirect(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux(WithCleanPathRedirect())
 	m.Get("/api/ping", echo("pong"))
 
@@ -1186,8 +1235,8 @@ func TestMuxCleanPathRedirect(t *testing.T) {
 	w := httptest.NewRecorder()
 	m.ServeHTTP(w, r)
 
-	assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
-	assert.Equal(t, "/api/ping", w.Header().Get("Location"))
+	ast.Equal(http.StatusTemporaryRedirect, w.Code)
+	ast.Equal("/api/ping", w.Header().Get("Location"))
 }
 
 // TestMuxCleanRedirectEscaping pins Location escaping: the cleaned escaped
@@ -1208,16 +1257,17 @@ func TestMuxCleanRedirectEscaping(t *testing.T) {
 		{"query kept verbatim", []string{"GET /a/b"}, "/a//b?x=%252F", "/a/b?x=%252F"},
 		{"encoded dots stay data", []string{"GET /"}, "/a/%2e%2e//b", "/a/%2e%2e/b"},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
 			m := NewMux(WithCleanPathRedirect())
-			for _, pattern := range test.patterns {
+			for _, pattern := range tt.patterns {
 				m.Handle(pattern, echo(pattern))
 			}
 
-			w := serve(m, http.MethodGet, test.target)
-			assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
-			assert.Equal(t, test.want, w.Header().Get("Location"))
+			w := serve(m, http.MethodGet, tt.target)
+			ast.Equal(http.StatusTemporaryRedirect, w.Code)
+			ast.Equal(tt.want, w.Header().Get("Location"))
 		})
 	}
 }
@@ -1226,29 +1276,32 @@ func TestMuxCleanRedirectEscaping(t *testing.T) {
 // preserved verbatim through RawPath; an invalid triplet falls back to
 // re-encoding, unreachable for requests whose EscapedPath is always valid.
 func TestRedirectURL(t *testing.T) {
+	ast := assert.New(t)
 	u := redirectURL("/a%2Fb/c")
-	assert.Equal(t, "/a/b/c", u.Path)
-	assert.Equal(t, "/a%2Fb/c", u.RawPath)
-	assert.Equal(t, "/a%2Fb/c", u.String())
+	ast.Equal("/a/b/c", u.Path)
+	ast.Equal("/a%2Fb/c", u.RawPath)
+	ast.Equal("/a%2Fb/c", u.String())
 
 	bad := redirectURL("/a%zz")
-	assert.Equal(t, "/a%zz", bad.Path)
-	assert.Equal(t, "/a%25zz", bad.String())
+	ast.Equal("/a%zz", bad.Path)
+	ast.Equal("/a%25zz", bad.String())
 }
 
 func TestRedirectStatus(t *testing.T) {
 	for _, code := range []int{0, 301, 302, 303, 307, 308} {
 		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			ast := assert.New(t)
 			want := code
 			if code == 0 {
 				want = http.StatusTemporaryRedirect
 			}
-			assert.Equal(t, want, redirectStatus(code))
+			ast.Equal(want, redirectStatus(code))
 		})
 	}
 	for _, code := range []int{-1, 200, 300, 304, 305, 306, 309, 404} {
 		t.Run(fmt.Sprint(code), func(t *testing.T) {
-			assert.PanicsWithError(t, fmt.Sprintf("mino: invalid redirect status %d: use 301, 302, 303, 307 or 308", code), func() {
+			ast := assert.New(t)
+			ast.PanicsWithError(fmt.Sprintf("mino: invalid redirect status %d: use 301, 302, 303, 307 or 308", code), func() {
 				redirectStatus(code)
 			})
 		})
@@ -1270,20 +1323,21 @@ func TestRedirectPath(t *testing.T) {
 		{"encoded leading slash", url.URL{Path: "//other.example/", RawPath: "/%2Fother.example/"}, "", "/%2Fother.example/"},
 		{"unicode query", url.URL{Path: "/docs/"}, "q=海诺&x=%25", "/docs/?q=%e6%b5%b7%e8%af%ba&x=%25"},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
 			m := NewMux()
 			r := httptest.NewRequest(http.MethodHead, "http://origin.example/start", nil)
-			r.URL.RawQuery = test.query
+			r.URL.RawQuery = tt.query
 			w := httptest.NewRecorder()
 
-			m.writeRedirect(w, r, redirectLocation(test.target, r.URL.RawQuery))
+			m.writeRedirect(w, r, redirectLocation(tt.target, r.URL.RawQuery))
 
-			assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
-			assert.Equal(t, test.want, w.Header().Get("Location"))
+			ast.Equal(http.StatusTemporaryRedirect, w.Code)
+			ast.Equal(tt.want, w.Header().Get("Location"))
 			location, err := url.Parse(w.Header().Get("Location"))
-			if assert.NoError(t, err) {
-				assert.Equal(t, r.URL.Host, r.URL.ResolveReference(location).Host)
+			if ast.NoError(err) {
+				ast.Equal(r.URL.Host, r.URL.ResolveReference(location).Host)
 			}
 		})
 	}
@@ -1305,25 +1359,26 @@ func TestRedirectPathResponse(t *testing.T) {
 		{name: "existing content type", method: http.MethodGet, code: 302, header: http.Header{"Content-Type": {"application/json"}}, contentType: "application/json"},
 		{name: "suppressed content type", method: http.MethodGet, code: 303, header: http.Header{"Content-Type": nil}},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			m := NewMux(WithRedirectStatus(test.code))
-			r := httptest.NewRequest(test.method, "/start?a=1&b=%25", nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			m := NewMux(WithRedirectStatus(tt.code))
+			r := httptest.NewRequest(tt.method, "/start?a=1&b=%25", nil)
 			w := httptest.NewRecorder()
-			for key, values := range test.header {
+			for key, values := range tt.header {
 				w.Header()[key] = values
 			}
 
 			m.writeRedirect(w, r, redirectLocation(url.URL{Path: "/docs/"}, r.URL.RawQuery))
 
-			code := test.code
+			code := tt.code
 			if code == 0 {
 				code = http.StatusTemporaryRedirect
 			}
-			assert.Equal(t, code, w.Code)
-			assert.Equal(t, "/docs/?a=1&b=%25", w.Header().Get("Location"))
-			assert.Equal(t, test.contentType, w.Header().Get("Content-Type"))
-			assert.Equal(t, test.body, w.Body.String())
+			ast.Equal(code, w.Code)
+			ast.Equal("/docs/?a=1&b=%25", w.Header().Get("Location"))
+			ast.Equal(tt.contentType, w.Header().Get("Content-Type"))
+			ast.Equal(tt.body, w.Body.String())
 		})
 	}
 }
@@ -1347,9 +1402,10 @@ func TestCleanPath(t *testing.T) {
 		{"encoded dots", "/a/%2e/%2E%2e/b", "/a/%2e/%2E%2e/b"},
 		{"encoded percent", "/a/%252e%252e//b", "/a/%252e%252e/b"},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.want, cleanPath(test.in))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			ast.Equal(tt.want, cleanPath(tt.in))
 		})
 	}
 }
@@ -1376,9 +1432,10 @@ func TestEscapedMatchPath(t *testing.T) {
 		{name: "exact slash pattern", in: "/%64ocs/{$}", isPattern: true, want: "/docs/{$}"},
 		{name: "static pattern", in: "/%61pi/%7bid%7d", isPattern: true, want: "/api/%7Bid}"},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.want, escapedMatchPath(test.in, test.isPattern))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			ast.Equal(tt.want, escapedMatchPath(tt.in, tt.isPattern))
 		})
 	}
 }
@@ -1397,9 +1454,10 @@ func TestUnescapePath(t *testing.T) {
 		{"incomplete escape", "a%2", "a%2"},
 		{"invalid escape", "a%20b/%zz", "a%20b/%zz"},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.want, unescapePath(test.in))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			ast.Equal(tt.want, unescapePath(tt.in))
 		})
 	}
 }
@@ -1419,11 +1477,12 @@ func TestEscapedPrefixEnd(t *testing.T) {
 		{"mixed spelling", "/你%E5%A5%BD/users", "/你好", "/你%E5%A5%BD"},
 		{"single decode", "/a%252Fb/users", "/a%2Fb", "/a%252Fb"},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			end := escapedPrefixEnd(test.in, len(test.prefix))
-			assert.Equal(t, test.escaped, test.in[:end])
-			assert.Equal(t, test.prefix, unescapePath(test.in[:end]))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			end := escapedPrefixEnd(tt.in, len(tt.prefix))
+			ast.Equal(tt.escaped, tt.in[:end])
+			ast.Equal(tt.prefix, unescapePath(tt.in[:end]))
 		})
 	}
 }
@@ -1439,9 +1498,10 @@ func TestEscapeNonASCII(t *testing.T) {
 		{"unicode", "/docs/?q=海诺", "/docs/?q=%e6%b5%b7%e8%af%ba"},
 		{"mixed spelling", "/你?q=好&x=%E5%A5%BD", "/%e4%bd%a0?q=%e5%a5%bd&x=%E5%A5%BD"},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.want, escapeNonASCII(test.in))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			ast.Equal(tt.want, escapeNonASCII(tt.in))
 		})
 	}
 }
@@ -1461,6 +1521,7 @@ func TestMuxEscapedTerminalSlash(t *testing.T) {
 }
 
 func TestMuxAsteriskRequestURI(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
 	m.Get("/ping", echo("pong"))
 
@@ -1469,11 +1530,12 @@ func TestMuxAsteriskRequestURI(t *testing.T) {
 
 	w := recorder(m, r)
 
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Equal(t, "close", w.Header().Get("Connection"))
+	ast.Equal(http.StatusBadRequest, w.Code)
+	ast.Equal("close", w.Header().Get("Connection"))
 }
 
 func TestMuxRoutesSorted(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
 	m.Post("/b", echo("b"))
 	m.Get("/a", echo("a"))
@@ -1484,21 +1546,23 @@ func TestMuxRoutesSorted(t *testing.T) {
 		patterns = append(patterns, r.Method+" "+r.Pattern)
 	}
 
-	assert.Equal(t, []string{"GET /a", "GET /c", "POST /b"}, patterns)
+	ast.Equal([]string{"GET /a", "GET /c", "POST /b"}, patterns)
 }
 
 func TestMuxMiddlewaresCopy(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
 	m.Use(func(next http.Handler) http.Handler { return next })
 
 	stack := m.Middlewares()
-	assert.Len(t, stack, 1)
+	ast.Len(stack, 1)
 
 	stack[0] = nil
-	assert.NotNil(t, m.Middlewares()[0])
+	ast.NotNil(m.Middlewares()[0])
 }
 
 func TestClearRouteValues(t *testing.T) {
+	ast := assert.New(t)
 	// Clearing removes only the parameters named by a previous Mino match,
 	// leaving application-owned values installed by middleware untouched.
 	r := httptest.NewRequest(http.MethodGet, "/a/42/b", nil)
@@ -1509,16 +1573,16 @@ func TestClearRouteValues(t *testing.T) {
 
 	clearRouteValues(r)
 
-	assert.Empty(t, r.PathValue("id"))
-	assert.Empty(t, r.PathValue("name"))
-	assert.Equal(t, "keep", r.PathValue("custom"))
+	ast.Empty(r.PathValue("id"))
+	ast.Empty(r.PathValue("name"))
+	ast.Equal("keep", r.PathValue("custom"))
 
 	// Catch-all parameters clear too.
 	r = httptest.NewRequest(http.MethodGet, "/a/x/y", nil)
 	r.SetPathValue("rest", "x/y")
 	r.Pattern = "GET /a/{rest...}"
 	clearRouteValues(r)
-	assert.Empty(t, r.PathValue("rest"))
+	ast.Empty(r.PathValue("rest"))
 
 	// "{$}" is not a parameter name; an unclosed brace must not loop forever.
 	r.Pattern = "GET /{$}"
@@ -1528,6 +1592,7 @@ func TestClearRouteValues(t *testing.T) {
 }
 
 func TestMuxRematchClearsStaleValues(t *testing.T) {
+	ast := assert.New(t)
 	// Re-dispatching a request another Mux already matched must clear
 	// stale parameters and install only the new match's values.
 	var carried *http.Request
@@ -1541,10 +1606,10 @@ func TestMuxRematchClearsStaleValues(t *testing.T) {
 	second.Get("/api/{name}", echo("second"))
 	w := recorder(second, carried)
 
-	assert.Equal(t, "second", w.Body.String())
-	assert.Equal(t, "GET /api/{name}", carried.Pattern)
-	assert.Empty(t, carried.PathValue("id"))
-	assert.Equal(t, "42", carried.PathValue("name"))
+	ast.Equal("second", w.Body.String())
+	ast.Equal("GET /api/{name}", carried.Pattern)
+	ast.Empty(carried.PathValue("id"))
+	ast.Equal("42", carried.PathValue("name"))
 }
 
 func TestValidMethod(t *testing.T) {
@@ -1560,9 +1625,10 @@ func TestValidMethod(t *testing.T) {
 		{"brace", "{bad}", false},
 		{"space", "a b", false},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.valid, validMethod(test.method))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			ast.Equal(tt.valid, validMethod(tt.method))
 		})
 	}
 }
@@ -1579,15 +1645,17 @@ func TestRequestHost(t *testing.T) {
 		{"connect keeps raw", "example.com:8443", http.MethodConnect, "example.com:8443"},
 		{"unparsable keeps raw", "a:b:c", http.MethodGet, "a:b:c"},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			r := &http.Request{Host: test.host, Method: test.method}
-			assert.Equal(t, test.want, requestHost(r))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			r := &http.Request{Host: tt.host, Method: tt.method}
+			ast.Equal(tt.want, requestHost(r))
 		})
 	}
 }
 
 func TestChainHandler(t *testing.T) {
+	ast := assert.New(t)
 	var order []string
 
 	h := &ChainHandler{
@@ -1599,10 +1667,11 @@ func TestChainHandler(t *testing.T) {
 
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
 
-	assert.Equal(t, []string{"first", "second", "handler"}, order)
+	ast.Equal([]string{"first", "second", "handler"}, order)
 }
 
 func TestChainHandlerCompile(t *testing.T) {
+	ast := assert.New(t)
 	stamp := func(name string) chain.Middleware {
 		return func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1625,8 +1694,8 @@ func TestChainHandlerCompile(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
 
-	assert.Equal(t, "first", w.Header().Get("X-Middleware"))
-	assert.Equal(t, "finish", w.Body.String())
+	ast.Equal("first", w.Header().Get("X-Middleware"))
+	ast.Equal("finish", w.Body.String())
 }
 
 func TestMuxHandlerCompatibility(t *testing.T) {
@@ -1665,20 +1734,21 @@ func TestMuxHandlerCompatibility(t *testing.T) {
 		{name: "connect unclean target", patterns: []string{"CONNECT probe.example/a/../docs/"}, method: "CONNECT", target: "http://probe.example/a/../docs?q=%25", host: "dispatch.example"},
 		{name: "asterisk query", method: "OPTIONS", target: "*"},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
 			m := NewMux(WithCleanPathRedirect(), WithEscapedPathMatching(), WithTrailingSlashRedirect())
 			standard := http.NewServeMux()
-			for _, pattern := range test.patterns {
+			for _, pattern := range tt.patterns {
 				// Identify the selected entry without relying on dispatch metadata.
 				h := echo(pattern)
 				m.Handle(pattern, h)
 				standard.Handle(pattern, h)
 			}
-			r := httptest.NewRequest(http.MethodGet, test.target, nil)
-			r.Method = test.method
-			if test.host != "" {
-				r.Host = test.host
+			r := httptest.NewRequest(http.MethodGet, tt.target, nil)
+			r.Method = tt.method
+			if tt.host != "" {
+				r.Host = tt.host
 			}
 			r.Pattern = "previous"
 			r.SetPathValue("id", "existing")
@@ -1689,10 +1759,10 @@ func TestMuxHandlerCompatibility(t *testing.T) {
 			var router Router = m
 			gotHandler, gotPattern := router.Handler(r)
 			wantHandler, wantPattern := standard.Handler(before)
-			assert.NotNil(t, gotHandler)
-			assert.Equal(t, before, r, "lookup must preserve the entire request")
-			assert.Same(t, originalURL, r.URL)
-			assert.Equal(t, "existing", r.PathValue("id"))
+			ast.NotNil(gotHandler)
+			ast.Equal(before, r, "lookup must preserve the entire request")
+			ast.Same(originalURL, r.URL)
+			ast.Equal("existing", r.PathValue("id"))
 			w, wantW := httptest.NewRecorder(), httptest.NewRecorder()
 			gotHandler.ServeHTTP(w, r.Clone(r.Context()))
 			wantHandler.ServeHTTP(wantW, before.Clone(before.Context()))
@@ -1718,19 +1788,19 @@ func TestMuxHandlerCompatibility(t *testing.T) {
 					}
 					return path
 				}
-				assert.Equal(t, http.StatusTemporaryRedirect, w.Code, "redirect status: mino")
-				assert.True(t, wantW.Code == http.StatusMovedPermanently || wantW.Code == http.StatusTemporaryRedirect,
+				ast.Equal(http.StatusTemporaryRedirect, w.Code, "redirect status: mino")
+				ast.True(wantW.Code == http.StatusMovedPermanently || wantW.Code == http.StatusTemporaryRedirect,
 					"redirect status: ServeMux %d", wantW.Code)
-				assert.Equal(t, target(wantW.Header().Get("Location")), target(w.Header().Get("Location")), "redirect target")
-				assert.Equal(t, wantW.Header()["Content-Type"], w.Header()["Content-Type"], "redirect content type")
-				assert.True(t, wantPattern == gotPattern || strings.HasPrefix(wantPattern, "/"),
+				ast.Equal(target(wantW.Header().Get("Location")), target(w.Header().Get("Location")), "redirect target")
+				ast.Equal(wantW.Header()["Content-Type"], w.Header()["Content-Type"], "redirect content type")
+				ast.True(wantPattern == gotPattern || strings.HasPrefix(wantPattern, "/"),
 					"redirect pattern: mino %q, ServeMux %q", gotPattern, wantPattern)
 				return
 			}
-			assert.Equal(t, wantPattern, gotPattern)
-			assert.Equal(t, wantW.Code, w.Code)
-			assert.Equal(t, wantW.Header(), w.Header())
-			assert.Equal(t, wantW.Body.String(), w.Body.String())
+			ast.Equal(wantPattern, gotPattern)
+			ast.Equal(wantW.Code, w.Code)
+			ast.Equal(wantW.Header(), w.Header())
+			ast.Equal(wantW.Body.String(), w.Body.String())
 		})
 	}
 }
@@ -1749,22 +1819,24 @@ func ExampleMux_Handler() {
 }
 
 func TestMuxHandlerParameters(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
 	m.Get("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(r.PathValue("id")))
 	})
 	r := httptest.NewRequest("GET", "/users/42", nil)
 	h, pattern := m.Handler(r)
-	assert.Equal(t, "GET /users/{id}", pattern)
-	assert.Empty(t, r.Pattern)
-	assert.Empty(t, r.PathValue("id"))
+	ast.Equal("GET /users/{id}", pattern)
+	ast.Empty(r.Pattern)
+	ast.Empty(r.PathValue("id"))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
-	assert.Empty(t, w.Body.String(), "the registered handler does not install parameters")
-	assert.Equal(t, "42", serve(m, "GET", "/users/42").Body.String())
+	ast.Empty(w.Body.String(), "the registered handler does not install parameters")
+	ast.Equal("42", serve(m, "GET", "/users/42").Body.String())
 }
 
 func TestMuxHandlerTreatsEmptyPathAsRoot(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
 	m.Get("/", echo("root"))
 
@@ -1774,11 +1846,11 @@ func TestMuxHandlerTreatsEmptyPathAsRoot(t *testing.T) {
 	r.URL.Path = ""
 
 	h, pattern := m.Handler(r)
-	assert.Equal(t, "GET /", pattern)
+	ast.Equal("GET /", pattern)
 
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
-	assert.Equal(t, "root", w.Body.String())
+	ast.Equal("root", w.Body.String())
 }
 
 func TestMuxHandlerPathPolicies(t *testing.T) {
@@ -1794,14 +1866,15 @@ func TestMuxHandlerPathPolicies(t *testing.T) {
 			for _, target := range []string{"/files/42", "/files/a%2Fb", "/files/%2F", "/files/%252F", "/docs", "/docs/", "/a//docs?q=%25", "/a%2Fb//docs?q=1", "/missing"} {
 				for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodPost} {
 					t.Run(method+" "+target, func(t *testing.T) {
+						ast := assert.New(t)
 						r := httptest.NewRequest(method, target, nil)
 						h, _ := m.Handler(r)
 						w := httptest.NewRecorder()
 						h.ServeHTTP(w, r)
 						wantW := serve(m, method, target)
-						assert.Equal(t, wantW.Code, w.Code)
-						assert.Equal(t, wantW.Header(), w.Header())
-						assert.Equal(t, wantW.Body.String(), w.Body.String())
+						ast.Equal(wantW.Code, w.Code)
+						ast.Equal(wantW.Header(), w.Header())
+						ast.Equal(wantW.Body.String(), w.Body.String())
 					})
 				}
 			}
@@ -1838,21 +1911,23 @@ func TestMuxHandlerViews(t *testing.T) {
 		{"mount keeps strip prefix", "/external/file", "/external/", m, []string{"inline", "/file"}},
 		{"mount root", "/external", "/external", view, []string{"inline", "/"}},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
 			calls = nil
-			r := httptest.NewRequest(http.MethodGet, test.target, nil)
-			h, pattern := test.router.Handler(r)
-			assert.Empty(t, calls, "lookup must not execute middleware or handlers")
-			assert.Empty(t, r.Pattern)
-			assert.Equal(t, test.pattern, pattern)
+			r := httptest.NewRequest(http.MethodGet, tt.target, nil)
+			h, pattern := tt.router.Handler(r)
+			ast.Empty(calls, "lookup must not execute middleware or handlers")
+			ast.Empty(r.Pattern)
+			ast.Equal(tt.pattern, pattern)
 			h.ServeHTTP(httptest.NewRecorder(), r)
-			assert.Equal(t, test.calls, calls)
+			ast.Equal(tt.calls, calls)
 		})
 	}
 }
 
 func TestMuxHandlerFallbacks(t *testing.T) {
+	ast := assert.New(t)
 	var calls []string
 	m := NewMux()
 	m.Use(tracer("root", &calls))
@@ -1863,13 +1938,13 @@ func TestMuxHandlerFallbacks(t *testing.T) {
 	})
 	view.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
 		calls = append(calls, "not allowed")
-		assert.Equal(t, "GET, HEAD", w.Header().Get("Allow"))
+		ast.Equal("GET, HEAD", w.Header().Get("Allow"))
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	})
 	api := m.Route("/api")
 	api.Use(tracer("child", &calls))
 	api.Get("/ping", echo("ping"))
-	for _, test := range []struct {
+	for _, tt := range []struct {
 		method, target string
 		status         int
 		calls          []string
@@ -1877,31 +1952,33 @@ func TestMuxHandlerFallbacks(t *testing.T) {
 		{"GET", "/api/missing", http.StatusNotFound, []string{"fallback", "not found"}},
 		{"POST", "/api/ping", http.StatusMethodNotAllowed, []string{"fallback", "not allowed"}},
 	} {
-		t.Run(test.method+" "+test.target, func(t *testing.T) {
+		t.Run(tt.method+" "+tt.target, func(t *testing.T) {
+			ast := assert.New(t)
 			calls = nil
-			r := httptest.NewRequest(test.method, test.target, nil)
+			r := httptest.NewRequest(tt.method, tt.target, nil)
 			h, pattern := api.Handler(r)
-			assert.Empty(t, calls)
-			assert.Empty(t, pattern)
+			ast.Empty(calls)
+			ast.Empty(pattern)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, r)
-			assert.Equal(t, test.status, w.Code)
-			assert.Equal(t, test.calls, calls)
+			ast.Equal(tt.status, w.Code)
+			ast.Equal(tt.calls, calls)
 		})
 	}
 	api.NotFound(echo("local"))
 	h, _ := api.Handler(httptest.NewRequest("GET", "/api/missing", nil))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest("GET", "/api/missing", nil))
-	assert.Equal(t, "local", w.Body.String())
+	ast.Equal("local", w.Body.String())
 	api.NotFound(nil)
 	calls = nil
 	h, _ = api.With().Handler(httptest.NewRequest("GET", "/api/missing", nil))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/api/missing", nil))
-	assert.Equal(t, []string{"fallback", "not found"}, calls)
+	ast.Equal([]string{"fallback", "not found"}, calls)
 }
 
 func TestMuxEmptyMuxClearsDelegatedMetadata(t *testing.T) {
+	ast := assert.New(t)
 	m := NewMux()
 	m.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "%t|%q|%s", r.Pattern == "", r.PathValue("id"), r.PathValue("custom"))
@@ -1916,8 +1993,8 @@ func TestMuxEmptyMuxClearsDelegatedMetadata(t *testing.T) {
 
 	w := recorder(m, r)
 
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "true|\"\"|keep", w.Body.String())
+	ast.Equal(http.StatusOK, w.Code)
+	ast.Equal("true|\"\"|keep", w.Body.String())
 }
 
 func TestMuxHandlerMountedMux(t *testing.T) {
@@ -1934,23 +2011,24 @@ func TestMuxHandlerMountedMux(t *testing.T) {
 	})
 	root.NotFound(func(http.ResponseWriter, *http.Request) { t.Error("mount must own its fallback") })
 	root.Mount("/external", child)
-	for _, test := range []struct {
+	for _, tt := range []struct {
 		target string
 		calls  []string
 	}{
 		{"/external/files/42", []string{"mounted", "42"}},
 		{"/external/missing", []string{"mounted", "mounted 404"}},
 	} {
-		t.Run(test.target, func(t *testing.T) {
+		t.Run(tt.target, func(t *testing.T) {
+			ast := assert.New(t)
 			calls = nil
-			r := httptest.NewRequest("GET", test.target, nil)
+			r := httptest.NewRequest("GET", tt.target, nil)
 			h, pattern := root.Handler(r)
-			assert.Equal(t, "/external/", pattern)
-			assert.Empty(t, calls)
-			assert.Empty(t, r.Pattern)
+			ast.Equal("/external/", pattern)
+			ast.Empty(calls)
+			ast.Empty(r.Pattern)
 			h.ServeHTTP(httptest.NewRecorder(), r)
-			assert.Equal(t, test.calls, calls)
-			assert.Equal(t, test.target, r.URL.Path)
+			ast.Equal(tt.calls, calls)
+			ast.Equal(tt.target, r.URL.Path)
 		})
 	}
 }
@@ -1958,6 +2036,7 @@ func TestMuxHandlerMountedMux(t *testing.T) {
 func TestMuxHandlerRedirectSnapshot(t *testing.T) {
 	for _, code := range []int{0, 301, 302, 303, 307, 308} {
 		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			ast := assert.New(t)
 			m := NewMux(WithCleanPathRedirect(), WithRedirectStatus(code))
 			r := httptest.NewRequest("GET", "/a//b?q=%25", nil)
 			h, _ := m.Handler(r)
@@ -1967,8 +2046,8 @@ func TestMuxHandlerRedirectSnapshot(t *testing.T) {
 			if code == 0 {
 				code = 307
 			}
-			assert.Equal(t, code, w.Code)
-			assert.Equal(t, "/a/b?q=%25", w.Header().Get("Location"))
+			ast.Equal(code, w.Code)
+			ast.Equal("/a/b?q=%25", w.Header().Get("Location"))
 		})
 	}
 }
@@ -2063,32 +2142,33 @@ func TestMuxPathPolicyComposition(t *testing.T) {
 							w.Header().Set("X-Query", r.URL.RawQuery)
 						})
 					}
-					for _, test := range tests {
-						t.Run(test.name, func(t *testing.T) {
-							status, location, allow := test.status, "", test.allow
-							if test.escapedOnly && conf.EscapedPath {
+					for _, tt := range tests {
+						t.Run(tt.name, func(t *testing.T) {
+							ast := assert.New(t)
+							status, location, allow := tt.status, "", tt.allow
+							if tt.escapedOnly && conf.EscapedPath {
 								status = http.StatusOK
 							}
-							if test.allowOnSlash {
+							if tt.allowOnSlash {
 								if conf.TrailingSlashRedirect {
 									status = http.StatusMethodNotAllowed
 								} else {
 									allow = ""
 								}
 							}
-							parentRedirect := conf.CleanPathRedirect && test.cleanLocation != ""
+							parentRedirect := conf.CleanPathRedirect && tt.cleanLocation != ""
 							if parentRedirect {
-								status, location = http.StatusTemporaryRedirect, test.cleanLocation
-								if mode != "route" && mode != "mount" && conf.TrailingSlashRedirect && test.slashLocation != "" {
-									location = test.slashLocation
+								status, location = http.StatusTemporaryRedirect, tt.cleanLocation
+								if mode != "route" && mode != "mount" && conf.TrailingSlashRedirect && tt.slashLocation != "" {
+									location = tt.slashLocation
 								}
-							} else if test.cleanLocation == "" && conf.TrailingSlashRedirect && test.slashLocation != "" {
-								status, location = http.StatusTemporaryRedirect, test.slashLocation
+							} else if tt.cleanLocation == "" && conf.TrailingSlashRedirect && tt.slashLocation != "" {
+								status, location = http.StatusTemporaryRedirect, tt.slashLocation
 								if mode == "mount" {
 									location = strings.TrimPrefix(location, "/api")
 								}
 							}
-							r := httptest.NewRequest(test.method, test.target, nil)
+							r := httptest.NewRequest(tt.method, tt.target, nil)
 							urlBefore := *r.URL
 							inside := r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/")
 							grouped := mode == "route" || mode == "mount"
@@ -2113,25 +2193,25 @@ func TestMuxPathPolicyComposition(t *testing.T) {
 							calls = nil
 							w := httptest.NewRecorder()
 							m.ServeHTTP(w, r)
-							assert.Equal(t, status, w.Code)
-							assert.Equal(t, location, w.Header().Get("Location"))
-							assert.Equal(t, allow, w.Header().Get("Allow"))
-							assert.Equal(t, fallback, w.Header().Get("X-Fallback"))
-							assert.Equal(t, wantCalls, calls)
-							assert.Equal(t, urlBefore, *r.URL, "routing must preserve the original URL")
+							ast.Equal(status, w.Code)
+							ast.Equal(location, w.Header().Get("Location"))
+							ast.Equal(allow, w.Header().Get("Allow"))
+							ast.Equal(fallback, w.Header().Get("X-Fallback"))
+							ast.Equal(wantCalls, calls)
+							ast.Equal(urlBefore, *r.URL, "routing must preserve the original URL")
 							if status == http.StatusOK {
-								assert.Equal(t, test.endpoint, w.Header().Get("X-Endpoint"))
-								assert.Equal(t, test.param, w.Header().Get("X-Param"))
+								ast.Equal(tt.endpoint, w.Header().Get("X-Endpoint"))
+								ast.Equal(tt.param, w.Header().Get("X-Param"))
 								wantPath, wantRawPath := r.URL.Path, r.URL.RawPath
 								if mode == "mount" {
 									wantPath = strings.TrimPrefix(wantPath, "/api")
 									wantRawPath = strings.TrimPrefix(wantRawPath, "/api")
 								}
-								assert.Equal(t, wantPath, w.Header().Get("X-Path"))
-								assert.Equal(t, wantRawPath, w.Header().Get("X-Raw-Path"))
-								assert.Equal(t, r.URL.RawQuery, w.Header().Get("X-Query"))
-								pattern := "GET /api/" + test.endpoint
-								switch test.endpoint {
+								ast.Equal(wantPath, w.Header().Get("X-Path"))
+								ast.Equal(wantRawPath, w.Header().Get("X-Raw-Path"))
+								ast.Equal(r.URL.RawQuery, w.Header().Get("X-Query"))
+								pattern := "GET /api/" + tt.endpoint
+								switch tt.endpoint {
 								case "files":
 									pattern = "GET /api/files/{id}"
 								case "hello":
@@ -2142,30 +2222,30 @@ func TestMuxPathPolicyComposition(t *testing.T) {
 								if mode == "mount" {
 									pattern = strings.Replace(pattern, "/api/", "/", 1)
 								}
-								assert.Equal(t, pattern, w.Header().Get("X-Pattern"))
+								ast.Equal(pattern, w.Header().Get("X-Pattern"))
 							}
 							// Query uses the same policies but excludes only the root Use
 							// chain; a returned group entry still performs child dispatch.
 							calls = calls[:0]
-							req := httptest.NewRequest(test.method, test.target, nil)
+							req := httptest.NewRequest(tt.method, tt.target, nil)
 							h, pattern := m.Handler(req)
-							assert.Empty(t, calls)
-							assert.Empty(t, req.Pattern)
-							assert.Empty(t, req.PathValue("id"))
+							ast.Empty(calls)
+							ast.Empty(req.Pattern)
+							ast.Empty(req.PathValue("id"))
 							if grouped && inside {
 								wantPattern := "/api/"
 								if req.URL.Path == "/api" {
 									wantPattern = "/api"
 								}
-								assert.Equal(t, wantPattern, pattern)
+								ast.Equal(wantPattern, pattern)
 							}
 							queried := httptest.NewRecorder()
 							h.ServeHTTP(queried, req)
-							assert.Equal(t, status, queried.Code)
+							ast.Equal(status, queried.Code)
 							for _, header := range []string{"Location", "Allow", "X-Fallback", "X-Endpoint"} {
-								assert.Equal(t, w.Header().Get(header), queried.Header().Get(header), header)
+								ast.Equal(w.Header().Get(header), queried.Header().Get(header), header)
 							}
-							assert.Equal(t, wantCalls[1:], calls)
+							ast.Equal(wantCalls[1:], calls)
 						})
 					}
 				})
@@ -2193,6 +2273,7 @@ func TestMuxPathPolicyFallbackScope(t *testing.T) {
 				child.Get("/fixed", echo("fixed"))
 				for _, stage := range []string{"inherited", "local", "inline reset"} {
 					t.Run(stage, func(t *testing.T) {
+						ast := assert.New(t)
 						switch stage {
 						case "local":
 							installCompositionFallbacks(child, "local", &calls)
@@ -2216,14 +2297,14 @@ func TestMuxPathPolicyFallbackScope(t *testing.T) {
 							if fallback != "" {
 								wantCalls = append(wantCalls, "fallback")
 							}
-							assert.Equal(t, fallback, w.Header().Get("X-Fallback"))
-							assert.Equal(t, wantCalls, calls)
+							ast.Equal(fallback, w.Header().Get("X-Fallback"))
+							ast.Equal(wantCalls, calls)
 							status, allow := http.StatusNotFound, ""
 							if request.method == "POST" {
 								status, allow = http.StatusMethodNotAllowed, "GET, HEAD"
 							}
-							assert.Equal(t, status, w.Code)
-							assert.Equal(t, allow, w.Header().Get("Allow"))
+							ast.Equal(status, w.Code)
+							ast.Equal(allow, w.Header().Get("Allow"))
 						}
 						// Child queries exclude both ancestor entries and child Use;
 						// fallback-bound middleware still belongs to the result.
@@ -2233,14 +2314,14 @@ func TestMuxPathPolicyFallbackScope(t *testing.T) {
 							target = "/missing"
 						}
 						h, pattern := child.Handler(httptest.NewRequest("GET", target, nil))
-						assert.Empty(t, calls)
-						assert.Empty(t, pattern)
+						ast.Empty(calls)
+						ast.Empty(pattern)
 						h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", target, nil))
 						want := []string(nil)
 						if stage == "local" || !mount {
 							want = []string{"fallback"}
 						}
-						assert.Equal(t, want, calls)
+						ast.Equal(want, calls)
 					})
 				}
 			})
@@ -2251,23 +2332,24 @@ func TestMuxPathPolicyFallbackScope(t *testing.T) {
 func TestMuxPathPolicyInheritance(t *testing.T) {
 	for mask := 0; mask < 8; mask++ {
 		t.Run(fmt.Sprintf("policies=%d", mask), func(t *testing.T) {
+			ast := assert.New(t)
 			conf := compositionConf(mask)
 			conf.RedirectStatus = http.StatusPermanentRedirect
 			root := NewMuxWithConf(conf)
 			view := root.With()
 			child := view.Route("/api")
-			assert.Equal(t, root.conf, view.(*Mux).conf)
-			assert.Equal(t, root.conf, child.(*Mux).conf)
+			ast.Equal(root.conf, view.(*Mux).conf)
+			ast.Equal(root.conf, child.(*Mux).conf)
 			child.Get("/docs/", echo("docs"))
 			if conf.TrailingSlashRedirect {
-				assert.Equal(t, http.StatusPermanentRedirect, serve(root, "GET", "/api/docs").Code)
+				ast.Equal(http.StatusPermanentRedirect, serve(root, "GET", "/api/docs").Code)
 			}
 			independent := NewMux()
 			before := independent.conf
 			independent.Get("/docs/", echo("docs"))
 			root.Mount("/external", independent)
-			assert.Equal(t, before, independent.conf, "Mount must not reconfigure its handler")
-			assert.Equal(t, http.StatusNotFound, serve(root, "GET", "/external/docs").Code)
+			ast.Equal(before, independent.conf, "Mount must not reconfigure its handler")
+			ast.Equal(http.StatusNotFound, serve(root, "GET", "/external/docs").Code)
 		})
 	}
 }
@@ -2276,6 +2358,7 @@ func TestMuxEncodedPrefixComposition(t *testing.T) {
 	for mask := 0; mask < 8; mask++ {
 		for _, mount := range []bool{false, true} {
 			t.Run(fmt.Sprintf("policies=%d/mount=%t", mask, mount), func(t *testing.T) {
+				ast := assert.New(t)
 				conf := compositionConf(mask)
 				root := NewMuxWithConf(conf)
 				var child Router
@@ -2300,18 +2383,18 @@ func TestMuxEncodedPrefixComposition(t *testing.T) {
 					w := httptest.NewRecorder()
 					root.ServeHTTP(w, r)
 					if conf.EscapedPath != escapedSlash {
-						assert.Equal(t, http.StatusNotFound, w.Code)
+						ast.Equal(http.StatusNotFound, w.Code)
 						continue
 					}
-					assert.Equal(t, http.StatusOK, w.Code)
-					assert.Equal(t, "42", w.Header().Get("X-Param"))
+					ast.Equal(http.StatusOK, w.Code)
+					ast.Equal("42", w.Header().Get("X-Param"))
 					path, pattern := r.URL.Path, "GET /api%2Fv1/files/{id}"
 					if mount {
 						path, pattern = "/files/42", "GET /files/{id}"
 					}
-					assert.Equal(t, path, w.Header().Get("X-Path"))
-					assert.Equal(t, pattern, w.Header().Get("X-Pattern"))
-					assert.Equal(t, before, *r.URL)
+					ast.Equal(path, w.Header().Get("X-Path"))
+					ast.Equal(pattern, w.Header().Get("X-Pattern"))
+					ast.Equal(before, *r.URL)
 				}
 			})
 		}
@@ -2320,42 +2403,47 @@ func TestMuxEncodedPrefixComposition(t *testing.T) {
 
 func TestMuxPathPolicyBoundaries(t *testing.T) {
 	t.Run("ordinary percent parameter", func(t *testing.T) {
+		ast := assert.New(t)
 		m := NewMux()
 		m.Get("/files/{id}", func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(r.PathValue("id")))
 		})
 		w := serve(m, http.MethodGet, "/files/%252F")
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, "%2F", w.Body.String())
+		ast.Equal(http.StatusOK, w.Code)
+		ast.Equal("%2F", w.Body.String())
 	})
 	t.Run("clean without escaped matching", func(t *testing.T) {
+		ast := assert.New(t)
 		m := NewMux(WithCleanPathRedirect())
 		m.Get("/", echo("fallback"))
 		w := serve(m, http.MethodGet, "/a%2Fb//c?q=%25")
-		assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
-		assert.Equal(t, "/a%2Fb/c?q=%25", w.Header().Get("Location"))
+		ast.Equal(http.StatusTemporaryRedirect, w.Code)
+		ast.Equal("/a%2Fb/c?q=%25", w.Header().Get("Location"))
 	})
 	t.Run("disabled cleaning", func(t *testing.T) {
+		ast := assert.New(t)
 		m := NewMux(WithEscapedPathMatching())
 		m.Get("/", echo("fallback"))
 		w := serve(m, http.MethodGet, "/a%2Fb//c")
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, "fallback", w.Body.String())
-		assert.Empty(t, w.Header().Get("Location"))
+		ast.Equal(http.StatusOK, w.Code)
+		ast.Equal("fallback", w.Body.String())
+		ast.Empty(w.Header().Get("Location"))
 	})
 	t.Run("disabled cleaning keeps slash target", func(t *testing.T) {
+		ast := assert.New(t)
 		m := NewMux(WithEscapedPathMatching(), WithTrailingSlashRedirect())
 		m.Get("/a%2Fb//docs/", echo("docs"))
 		w := serve(m, http.MethodGet, "/a%2Fb//docs?q=%25")
-		assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
-		assert.Equal(t, "/a%2Fb//docs/?q=%25", w.Header().Get("Location"))
+		ast.Equal(http.StatusTemporaryRedirect, w.Code)
+		ast.Equal("/a%2Fb//docs/?q=%25", w.Header().Get("Location"))
 	})
 	t.Run("custom redirect status", func(t *testing.T) {
+		ast := assert.New(t)
 		m := NewMux(WithCleanPathRedirect(), WithEscapedPathMatching(), WithRedirectStatus(http.StatusPermanentRedirect))
 		m.Get("/", echo("fallback"))
 		w := serve(m, http.MethodPost, "/a%2Fb//c?q=%25")
-		assert.Equal(t, http.StatusPermanentRedirect, w.Code)
-		assert.Equal(t, "/a%2Fb/c?q=%25", w.Header().Get("Location"))
+		ast.Equal(http.StatusPermanentRedirect, w.Code)
+		ast.Equal("/a%2Fb/c?q=%25", w.Header().Get("Location"))
 	})
 }
 
@@ -2372,16 +2460,17 @@ func TestMuxEscapedSlashCompatibility(t *testing.T) {
 		{"method candidates", []string{"GET /files/{id}", "POST /files/{rest...}"}, []string{"/files/%2F", "/files/42"}},
 		{"root fallback", []string{"GET /files/{id}", "/"}, []string{"/files/%2F", "/files/%252F"}},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			m := NewMux(WithCleanPathRedirect(), WithEscapedPathMatching(), WithTrailingSlashRedirect())
 			standard := http.NewServeMux()
-			registerRoutingComparison(m, standard, test.patterns)
-			for _, target := range test.targets {
+			registerRoutingComparison(m, standard, tt.patterns)
+			for _, target := range tt.targets {
 				for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodPost} {
 					t.Run(method+" "+target, func(t *testing.T) {
+						ast := assert.New(t)
 						want := observeRouting(standard, method, target, "")
-						assert.Equal(t, want, observeRouting(m, method, target, ""))
+						ast.Equal(want, observeRouting(m, method, target, ""))
 					})
 				}
 			}
@@ -2402,16 +2491,17 @@ func TestMuxCleanRedirectCompatibility(t *testing.T) {
 		{"explicit root", []string{"GET /a%2Fb/docs", "GET /a%2Fb/docs/"}, []string{"/a%2Fb/docs", "/a%2Fb//docs"}},
 		{"unmatched", nil, []string{"/a%2Fb//missing?q=%25", "/a%252Fb//missing"}},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			m := NewMux(WithCleanPathRedirect(), WithEscapedPathMatching(), WithTrailingSlashRedirect())
 			standard := http.NewServeMux()
-			registerRoutingComparison(m, standard, test.patterns)
-			for _, target := range test.targets {
+			registerRoutingComparison(m, standard, tt.patterns)
+			for _, target := range tt.targets {
 				for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodPost} {
 					t.Run(method+" "+target, func(t *testing.T) {
+						ast := assert.New(t)
 						want := observeRouting(standard, method, target, "")
-						assert.Equal(t, want, observeRouting(m, method, target, ""))
+						ast.Equal(want, observeRouting(m, method, target, ""))
 					})
 				}
 			}
@@ -2436,16 +2526,17 @@ func TestMuxConnectHostPriority(t *testing.T) {
 		{"global fallback", []string{"CONNECT other.example/unused", "CONNECT /docs/{id}"}, "http://probe.example/docs/42", "dispatch.example"},
 		{"unclean slash target", []string{"CONNECT probe.example/a/../docs/"}, "http://probe.example/a/../docs?q=%25", "dispatch.example"},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			for mask := 0; mask < 4; mask++ {
 				clean, escaped := mask&1 != 0, mask&2 != 0
 				t.Run(fmt.Sprintf("clean=%t/escaped=%t", clean, escaped), func(t *testing.T) {
+					ast := assert.New(t)
 					m := NewMuxWithConf(MuxConf{CleanPathRedirect: clean, EscapedPath: escaped, TrailingSlashRedirect: true})
 					standard := http.NewServeMux()
-					registerRoutingComparison(m, standard, test.patterns)
-					want := observeRouting(standard, http.MethodConnect, test.target, test.host)
-					assert.Equal(t, want, observeRouting(m, http.MethodConnect, test.target, test.host))
+					registerRoutingComparison(m, standard, tt.patterns)
+					want := observeRouting(standard, http.MethodConnect, tt.target, tt.host)
+					ast.Equal(want, observeRouting(m, http.MethodConnect, tt.target, tt.host))
 				})
 			}
 		})
@@ -2453,6 +2544,7 @@ func TestMuxConnectHostPriority(t *testing.T) {
 }
 
 func TestMuxConnectRedirectRequiresPolicy(t *testing.T) {
+	ast := assert.New(t)
 	// CONNECT matching dispatches on the Host header; build requests like
 	// observeRouting does — as GET with the method swapped afterwards.
 	connect := func(target string) *http.Request {
@@ -2464,17 +2556,18 @@ func TestMuxConnectRedirectRequiresPolicy(t *testing.T) {
 	// Without the trailing-slash policy a CONNECT request never probes for one.
 	off := NewMuxWithConf(MuxConf{})
 	off.Handle("CONNECT example.com/db", echo("db"))
-	assert.Equal(t, "db", recorder(off, connect("http://example.com/db")).Body.String())
+	ast.Equal("db", recorder(off, connect("http://example.com/db")).Body.String())
 
 	// With the policy on, an already slash-terminated path skips the probe too.
 	on := NewMuxWithConf(MuxConf{TrailingSlashRedirect: true})
 	on.Handle("CONNECT example.com/db/", echo("db"))
-	assert.Equal(t, "db", recorder(on, connect("http://example.com/db/")).Body.String())
+	ast.Equal("db", recorder(on, connect("http://example.com/db/")).Body.String())
 }
 
 // ServeMux alone decides which generated tables are legal; Mino must
 // accept every one it accepts.
 func TestMuxLegalRouteTables(t *testing.T) {
+	ast := assert.New(t)
 	patterns := []string{
 		"/", "/{$}", "/a", "/a/", "/a/{$}", "/a/{id}", "/a/{rest...}",
 		"/{name}/b", "/a/{id}/b", "/a/fixed", "GET /", "GET /a", "HEAD /a",
@@ -2519,7 +2612,7 @@ func TestMuxLegalRouteTables(t *testing.T) {
 	}
 	check("empty", nil)
 	for i, first := range patterns {
-		if !assert.True(t, standardRouteTable([]string{first}), "corpus pattern must be legal: %q", first) {
+		if !ast.True(standardRouteTable([]string{first}), "corpus pattern must be legal: %q", first) {
 			return
 		}
 		check(fmt.Sprintf("single-%02d", i), []string{first})
@@ -2536,8 +2629,8 @@ func TestMuxLegalRouteTables(t *testing.T) {
 			}
 		}
 	}
-	assert.Greater(t, accepted, 400)
-	assert.Greater(t, rejected, 0)
+	ast.Greater(accepted, 400)
+	ast.Greater(rejected, 0)
 	t.Logf("generated tables: accepted=%d rejected-by-ServeMux=%d; registration permutations=%d; request cases/table=%d", accepted, rejected, registrations, len(requests))
 }
 
@@ -2563,12 +2656,13 @@ func TestMuxLegalRouteTableScenarios(t *testing.T) {
 			{"CONNECT", "http://probe.example/docs", "dispatch.example"}, {"GET", "http://probe.example/docs", "dispatch.example"}, {"PUT", "http://probe.example/docs", "dispatch.example"},
 		}},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if !assert.True(t, standardRouteTable(test.patterns), "fixture must be accepted by ServeMux") {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			if !ast.True(standardRouteTable(tt.patterns), "fixture must be accepted by ServeMux") {
 				return
 			}
-			checkLegalRouteTable(t, test.patterns, test.requests)
+			checkLegalRouteTable(t, tt.patterns, tt.requests)
 		})
 	}
 }
@@ -2587,14 +2681,14 @@ func BenchmarkMuxHandler(b *testing.B) {
 		{"not-found", "GET", "/missing", false, false},
 		{"method-not-allowed", "POST", "/hello", false, false},
 	}
-	for _, test := range tests {
-		b.Run(test.name, func(b *testing.B) {
-			m := NewMuxWithConf(MuxConf{CleanPathRedirect: test.clean, EscapedPath: test.escaped, TrailingSlashRedirect: true})
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			m := NewMuxWithConf(MuxConf{CleanPathRedirect: tt.clean, EscapedPath: tt.escaped, TrailingSlashRedirect: true})
 			handler := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 			m.Handle("GET /hello", handler)
 			m.Handle("GET /users/{id}", handler)
 			m.Handle("GET /docs/", handler)
-			r := httptest.NewRequest(test.method, test.target, nil)
+			r := httptest.NewRequest(tt.method, tt.target, nil)
 			var h http.Handler
 			var pattern string
 			b.ReportAllocs()
@@ -2629,17 +2723,17 @@ func BenchmarkMuxCompatibility(b *testing.B) {
 		{name: "connect-match", patterns: []string{"CONNECT /docs"}, method: "CONNECT", target: "http://probe.example/docs", host: "dispatch.example"},
 		{name: "connect-host-miss", patterns: []string{"CONNECT probe.example/docs", "CONNECT dispatch.example/docs/"}, method: "CONNECT", target: "http://probe.example/docs", host: "dispatch.example"},
 	}
-	for _, test := range tests {
-		b.Run(test.name, func(b *testing.B) {
-			m := NewMuxWithConf(MuxConf{CleanPathRedirect: test.clean, EscapedPath: test.escaped, TrailingSlashRedirect: true})
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			m := NewMuxWithConf(MuxConf{CleanPathRedirect: tt.clean, EscapedPath: tt.escaped, TrailingSlashRedirect: true})
 			var value string
-			for _, pattern := range test.patterns {
+			for _, pattern := range tt.patterns {
 				m.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) { value = r.PathValue("id") })
 			}
-			template := *httptest.NewRequest(http.MethodGet, test.target, nil)
-			template.Method = test.method
-			if test.host != "" {
-				template.Host = test.host
+			template := *httptest.NewRequest(http.MethodGet, tt.target, nil)
+			template.Method = tt.method
+			if tt.host != "" {
+				template.Host = tt.host
 			}
 			r := new(http.Request)
 			w := &discardWriter{header: make(http.Header)}

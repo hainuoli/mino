@@ -16,19 +16,21 @@ var (
 )
 
 func TestWrap(t *testing.T) {
-	assert.Nil(t, Wrap(nil, "test"))
-	assert.Equal(t, "foo: bar", Wrap(errors.New("bar"), "foo").Error())
+	ast := assert.New(t)
+	ast.Nil(Wrap(nil, "test"))
+	ast.Equal("foo: bar", Wrap(errors.New("bar"), "foo").Error())
 
 	err := errors.New("foo")
-	assert.True(t, errors.Is(Wrap(err, "bar"), err))
+	ast.True(errors.Is(Wrap(err, "bar"), err))
 }
 
 func TestWrapf(t *testing.T) {
-	assert.Nil(t, Wrapf(nil, "%s", "test"))
-	assert.Equal(t, "foo bar: quz", Wrapf(errors.New("quz"), "foo %s", "bar").Error())
+	ast := assert.New(t)
+	ast.Nil(Wrapf(nil, "%s", "test"))
+	ast.Equal("foo bar: quz", Wrapf(errors.New("quz"), "foo %s", "bar").Error())
 
 	err := errors.New("foo")
-	assert.True(t, errors.Is(Wrapf(err, "foo %s", "bar"), err))
+	ast.True(errors.Is(Wrapf(err, "foo %s", "bar"), err))
 }
 
 func TestIn(t *testing.T) {
@@ -78,17 +80,20 @@ func TestIn(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, In(tt.err, tt.errs...))
+			ast := assert.New(t)
+			ast.Equal(tt.want, In(tt.err, tt.errs...))
 		})
 	}
 }
 
 func TestChain(t *testing.T) {
 	t.Run("no functions", func(t *testing.T) {
-		assert.Nil(t, Chain())
+		ast := assert.New(t)
+		ast.Nil(Chain())
 	})
 
 	t.Run("all functions succeed", func(t *testing.T) {
+		ast := assert.New(t)
 		var calls []int
 
 		err := Chain(
@@ -102,11 +107,12 @@ func TestChain(t *testing.T) {
 			},
 		)
 
-		assert.Nil(t, err)
-		assert.Equal(t, []int{1, 2}, calls)
+		ast.Nil(err)
+		ast.Equal([]int{1, 2}, calls)
 	})
 
 	t.Run("stops at the first error", func(t *testing.T) {
+		ast := assert.New(t)
 		var calls []int
 
 		err := Chain(
@@ -124,32 +130,36 @@ func TestChain(t *testing.T) {
 			},
 		)
 
-		assert.Equal(t, errDummy, err)
-		assert.Equal(t, []int{1, 2}, calls)
+		ast.Equal(errDummy, err)
+		ast.Equal([]int{1, 2}, calls)
 	})
 }
 
 func TestAtomicError(t *testing.T) {
+	ast := assert.New(t)
 	var err AtomicError
 	err.Set(errDummy)
-	assert.Equal(t, errDummy, err.Load())
+	ast.Equal(errDummy, err.Load())
 }
 
 func TestAtomicErrorSetNil(t *testing.T) {
+	ast := assert.New(t)
 	var (
 		errNil error
 		err    AtomicError
 	)
 	err.Set(errNil)
-	assert.Equal(t, errNil, err.Load())
+	ast.Equal(errNil, err.Load())
 }
 
 func TestAtomicErrorNil(t *testing.T) {
+	ast := assert.New(t)
 	var err AtomicError
-	assert.Nil(t, err.Load())
+	ast.Nil(err.Load())
 }
 
 func TestAtomicErrorConcurrent(t *testing.T) {
+	ast := assert.New(t)
 	const count = 100
 
 	var (
@@ -166,44 +176,49 @@ func TestAtomicErrorConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 
-	assert.NotNil(t, aerr.Load())
+	ast.NotNil(aerr.Load())
 }
 
 func TestBatchErrorNil(t *testing.T) {
+	ast := assert.New(t)
 	var batch BatchError
-	assert.Nil(t, batch.Err())
-	assert.False(t, batch.NotNil())
+	ast.Nil(batch.Err())
+	ast.False(batch.NotNil())
 	batch.Add(nil)
-	assert.Nil(t, batch.Err())
-	assert.False(t, batch.NotNil())
+	ast.Nil(batch.Err())
+	ast.False(batch.NotNil())
 }
 
 func TestBatchErrorNilFromFunc(t *testing.T) {
+	ast := assert.New(t)
 	err := func() error {
 		var be BatchError
 		return be.Err()
 	}()
-	assert.True(t, err == nil)
+	ast.True(err == nil)
 }
 
 func TestBatchErrorOneError(t *testing.T) {
+	ast := assert.New(t)
 	var batch BatchError
 	batch.Add(err1)
-	assert.NotNil(t, batch.Err())
-	assert.Equal(t, err1.Error(), batch.Err().Error())
-	assert.True(t, batch.NotNil())
+	ast.NotNil(batch.Err())
+	ast.Equal(err1.Error(), batch.Err().Error())
+	ast.True(batch.NotNil())
 }
 
 func TestBatchErrorWithErrors(t *testing.T) {
+	ast := assert.New(t)
 	var batch BatchError
 	batch.Add(err1)
 	batch.Add(err2)
-	assert.NotNil(t, batch.Err())
-	assert.Equal(t, fmt.Sprintf("%s\n%s", err1.Error(), err2.Error()), batch.Err().Error())
-	assert.True(t, batch.NotNil())
+	ast.NotNil(batch.Err())
+	ast.Equal(fmt.Sprintf("%s\n%s", err1.Error(), err2.Error()), batch.Err().Error())
+	ast.True(batch.NotNil())
 }
 
 func TestBatchErrorConcurrentAdd(t *testing.T) {
+	ast := assert.New(t)
 	const count = 10000
 
 	var (
@@ -220,79 +235,85 @@ func TestBatchErrorConcurrentAdd(t *testing.T) {
 	}
 	wg.Wait()
 
-	assert.NotNil(t, batch.Err())
-	assert.Equal(t, count, len(batch.errs))
-	assert.True(t, batch.NotNil())
+	ast.NotNil(batch.Err())
+	ast.Equal(count, len(batch.errs))
+	ast.True(batch.NotNil())
 }
 
 func TestBatchError_Unwrap(t *testing.T) {
 	t.Run("nil", func(t *testing.T) {
+		ast := assert.New(t)
 		var be BatchError
-		assert.Nil(t, be.Err())
-		assert.True(t, errors.Is(be.Err(), nil))
+		ast.Nil(be.Err())
+		ast.True(errors.Is(be.Err(), nil))
 	})
 
 	t.Run("one error", func(t *testing.T) {
+		ast := assert.New(t)
 		var be BatchError
 		be.Add(err1)
-		assert.True(t, errors.Is(be.Err(), err1))
-		assert.False(t, errors.Is(be.Err(), err2))
+		ast.True(errors.Is(be.Err(), err1))
+		ast.False(errors.Is(be.Err(), err2))
 	})
 
 	t.Run("two errors", func(t *testing.T) {
+		ast := assert.New(t)
 		var be BatchError
 		be.Add(err1)
 		be.Add(err2)
-		assert.True(t, errors.Is(be.Err(), err1))
-		assert.True(t, errors.Is(be.Err(), err2))
-		assert.False(t, errors.Is(be.Err(), errDummy))
+		ast.True(errors.Is(be.Err(), err1))
+		ast.True(errors.Is(be.Err(), err2))
+		ast.False(errors.Is(be.Err(), errDummy))
 	})
 }
 
 func TestBatchError_Add(t *testing.T) {
+	ast := assert.New(t)
 	var be BatchError
 
 	// Test adding nil errors
 	be.Add(nil, nil)
-	assert.False(t, be.NotNil(), "Expected BatchError to be empty after adding nil errors")
+	ast.False(be.NotNil(), "Expected BatchError to be empty after adding nil errors")
 
 	// Test adding non-nil errors
 	be.Add(err1, err2)
-	assert.True(t, be.NotNil(), "Expected BatchError to be non-empty after adding errors")
+	ast.True(be.NotNil(), "Expected BatchError to be non-empty after adding errors")
 
 	// Test adding a mix of nil and non-nil errors
 	be.Add(nil, errDummy, nil)
-	assert.True(t, be.NotNil(), "Expected BatchError to be non-empty after adding a mix of nil and non-nil errors")
-	assert.Equal(t, 3, len(be.errs), "Expected nil errors to be ignored")
+	ast.True(be.NotNil(), "Expected BatchError to be non-empty after adding a mix of nil and non-nil errors")
+	ast.Equal(3, len(be.errs), "Expected nil errors to be ignored")
 }
 
 func TestBatchError_Err(t *testing.T) {
+	ast := assert.New(t)
 	var be BatchError
 
 	// Test Err() on empty BatchError
-	assert.Nil(t, be.Err(), "Expected nil error for empty BatchError")
+	ast.Nil(be.Err(), "Expected nil error for empty BatchError")
 
 	// Test Err() with multiple errors
 	be.Add(err1, err2)
 
 	combinedErr := be.Err()
-	assert.NotNil(t, combinedErr, "Expected non-nil error for BatchError with multiple errors")
+	ast.NotNil(combinedErr, "Expected non-nil error for BatchError with multiple errors")
 
 	// Check if the combined error contains both error messages
 	errString := combinedErr.Error()
-	assert.Truef(t, errors.Is(combinedErr, err1), "Combined error doesn't contain first error: %s", errString)
-	assert.Truef(t, errors.Is(combinedErr, err2), "Combined error doesn't contain second error: %s", errString)
+	ast.Truef(errors.Is(combinedErr, err1), "Combined error doesn't contain first error: %s", errString)
+	ast.Truef(errors.Is(combinedErr, err2), "Combined error doesn't contain second error: %s", errString)
 }
 
 func TestBatchError_NotNil(t *testing.T) {
+	ast := assert.New(t)
 	var be BatchError
 
 	// Test NotNil() on empty BatchError
-	assert.False(t, be.NotNil(), "Expected empty BatchError to report NotNil() as false")
-	assert.Nil(t, be.Err(), "Expected nil error for empty BatchError")
+	ast.False(be.NotNil(), "Expected empty BatchError to report NotNil() as false")
+	ast.Nil(be.Err(), "Expected nil error for empty BatchError")
 
 	// Test NotNil() after adding an error
 	be.Add(errDummy)
-	assert.True(t, be.NotNil(), "Expected non-nil error after adding an error")
-	assert.NotNil(t, be.Err(), "Expected non-nil error after adding an error")
+	ast.True(be.NotNil(), "Expected non-nil error after adding an error")
+	ast.NotNil(be.Err(), "Expected non-nil error after adding an error")
 }
