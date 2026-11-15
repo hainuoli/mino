@@ -8,6 +8,7 @@ after the version.
 
 ### Features
 
+* ✨ Add httpx request and response helpers. PR [#9](https://github.com/hainuoli/mino/pull/9) by [@hainuoli](https://github.com/hainuoli).
 * ✨ Add mapping Deref helper. PR [#8](https://github.com/hainuoli/mino/pull/8) by [@hainuoli](https://github.com/hainuoli).
 * ✨ Add tagged struct binding. PR [#5](https://github.com/hainuoli/mino/pull/5) by [@hainuoli](https://github.com/hainuoli).
 * ✨ Add reusable error handling utilities. PR [#4](https://github.com/hainuoli/mino/pull/4) by [@hainuoli](https://github.com/hainuoli).
