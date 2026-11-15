@@ -3,41 +3,17 @@ package mapping
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-// lookup returns a Bind lookup function over the given values.
-func lookup(values map[string][]string) func(string) []string {
-	return func(key string) []string { return values[key] }
-}
-
-func ExampleBind() {
-	var config struct {
-		Host string `config:"host"`
-		Port int    `config:"port"`
-	}
-	values := map[string][]string{"host": {"localhost"}, "port": {"8080"}}
-	if err := Bind(&config, "config", func(key string) []string {
-		return values[key]
-	}); err != nil {
-		panic(err)
-	}
-	fmt.Println(config.Host, config.Port)
-	// Output: localhost 8080
-}
-
-// Options is an embedded struct, whose pointer is allocated only on demand.
-type Options struct {
-	Limit *int `value:"limit"`
-}
-
-// textID parses only the name "admin", so bind errors carry a distinct cause.
+// textID and words stay at package scope because Go cannot declare methods on
+// types defined inside a function.
 type textID int
 
 var errUnknownID = errors.New("unknown ID")
@@ -50,7 +26,6 @@ func (id *textID) UnmarshalText(data []byte) error {
 	return nil
 }
 
-// words splits its text on commas, exercising TextUnmarshaler over slices.
 type words []string
 
 func (w *words) UnmarshalText(data []byte) error {
@@ -58,8 +33,50 @@ func (w *words) UnmarshalText(data []byte) error {
 	return nil
 }
 
+func TestDeref(t *testing.T) {
+	tests := []struct {
+		name    string
+		target  any
+		kind    reflect.Kind
+		wantErr bool
+	}{
+		{"nil", nil, reflect.Invalid, true},
+		{"non-pointer", 0, reflect.Invalid, true},
+		{"nil pointer", (*int)(nil), reflect.Invalid, true},
+		{"scalar", new(int), reflect.Int, false},
+		{"struct", &struct{}{}, reflect.Struct, false},
+		{"slice", new([]int), reflect.Slice, false},
+		{"array", new([1]string), reflect.Array, false},
+		{"map", new(map[string]int), reflect.Map, false},
+		{"interface", new(any), reflect.Interface, false},
+		{"one pointer level", new(*int), reflect.Pointer, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			value, err := Deref(tt.target)
+			if tt.wantErr {
+				ast.ErrorIs(err, ErrInvalidTarget)
+				ast.False(value.IsValid())
+				return
+			}
+			if ast.NoError(err) {
+				ast.Equal(tt.kind, value.Kind())
+				ast.True(value.CanSet())
+				ast.True(value.IsZero())
+			}
+		})
+	}
+}
+
 func TestBindTypes(t *testing.T) {
-	var dst struct {
+	// Options must stay exported: reflect can only allocate an embedded
+	// pointer whose field name is exported.
+	type Options struct {
+		Limit *int `value:"limit"`
+	}
+
+	type inner struct {
 		*Options
 		Name string    `value:"name"`
 		Flag bool      `value:"flag"`
@@ -71,32 +88,39 @@ func TestBindTypes(t *testing.T) {
 		Role textID    `value:"role"`
 		Tags words     `value:"tags"`
 	}
-	require.NoError(t, Bind(&dst, "value", nil))
-	assert.Nil(t, dst.Options)
+
 	values := map[string][]string{
 		"limit": {"0"}, "name": {"first", "second"}, "flag": {"true"},
 		"n": {"-2"}, "u": {"9"}, "f": {"1.5"}, "id": {"3", "4"},
 		"when": {"2026-01-01T00:00:00Z"}, "role": {"admin"}, "tags": {"a,b", "ignored"},
 	}
-	require.NoError(t, Bind(&dst, "value", lookup(values)))
-	require.NotNil(t, dst.Options)
-	require.NotNil(t, dst.Limit)
-	assert.Zero(t, *dst.Limit)
-	assert.Equal(t, "first", dst.Name)
-	assert.True(t, dst.Flag)
-	assert.Equal(t, int8(-2), dst.N)
-	assert.Equal(t, uint16(9), dst.U)
-	assert.Equal(t, float32(1.5), dst.F)
-	require.Len(t, dst.IDs, 2)
-	assert.Equal(t, 3, *dst.IDs[0])
-	assert.Equal(t, 4, *dst.IDs[1])
-	assert.Equal(t, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), dst.When)
-	assert.Equal(t, textID(42), dst.Role)
-	assert.Equal(t, words{"a", "b"}, dst.Tags)
+
+	var in inner
+	ast := assert.New(t)
+	if ast.NoError(Bind(&in, "value", nil)) {
+		ast.Nil(in.Options)
+	}
+	if ast.NoError(Bind(&in, "value", func(key string) []string {
+		return values[key]
+	})) {
+		ast.NotNil(in.Options)
+		ast.Equal(0, *in.Limit)
+		ast.Equal("first", in.Name)
+		ast.True(in.Flag)
+		ast.Equal(int8(-2), in.N)
+		ast.Equal(uint16(9), in.U)
+		ast.Equal(float32(1.5), in.F)
+		ast.Len(in.IDs, 2)
+		ast.Equal(3, *in.IDs[0])
+		ast.Equal(4, *in.IDs[1])
+		ast.Equal(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), in.When)
+		ast.Equal(textID(42), in.Role)
+		ast.Equal(words{"a", "b"}, in.Tags)
+	}
 }
 
 func TestBindPresence(t *testing.T) {
-	dst := &struct {
+	in := &struct {
 		Keep     string `value:"missing"`
 		Empty    string `value:"empty"`
 		Ignored  string `value:"-"`
@@ -109,18 +133,29 @@ func TestBindPresence(t *testing.T) {
 		Untagged: "default",
 		private:  "default",
 	}
-	values := map[string][]string{"empty": {""}, "-": {"input"}, "Untagged": {"input"}, "private": {"input"}}
-	require.NoError(t, Bind(dst, "value", lookup(values)))
-	assert.Empty(t, dst.Empty)
-	assert.Equal(t, "default", dst.Keep)
-	assert.Equal(t, "default", dst.Ignored)
-	assert.Equal(t, "default", dst.Untagged)
-	assert.Equal(t, "default", dst.private)
+	values := map[string][]string{
+		"empty": {""}, "-": {"input"}, "Untagged": {"input"}, "private": {"input"},
+	}
+
+	ast := assert.New(t)
+	if ast.NoError(Bind(in, "value", func(key string) []string {
+		return values[key]
+	})) {
+		ast.Empty(in.Empty)
+		ast.Equal("default", in.Keep)
+		ast.Equal("default", in.Ignored)
+		ast.Equal("default", in.Untagged)
+		ast.Equal("default", in.private)
+	}
 
 	// Binding another source preserves values not supplied by that source.
-	require.NoError(t, Bind(dst, "value", lookup(map[string][]string{"missing": {"next"}})))
-	assert.Equal(t, "next", dst.Keep)
-	assert.Empty(t, dst.Empty)
+	next := map[string][]string{"missing": {"next"}}
+	if ast.NoError(Bind(in, "value", func(key string) []string {
+		return next[key]
+	})) {
+		ast.Equal("next", in.Keep)
+		ast.Empty(in.Empty)
+	}
 }
 
 func TestBindInputErrors(t *testing.T) {
@@ -142,44 +177,60 @@ func TestBindInputErrors(t *testing.T) {
 			N float32 `value:"n"`
 		}{}, "1e100"},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			err := Bind(test.dst, "value", lookup(map[string][]string{"n": {test.value}}))
-			require.Error(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Bind(tt.dst, "value", func(string) []string {
+				return []string{tt.value}
+			})
+			ast := assert.New(t)
+			ast.Error(err)
 			var numErr *strconv.NumError
-			assert.ErrorAs(t, err, &numErr)
-			assert.NotErrorIs(t, err, ErrInvalidTarget)
-			assert.Contains(t, err.Error(), `value "n"`)
+			ast.ErrorAs(err, &numErr)
+			ast.NotErrorIs(err, ErrInvalidTarget)
+			ast.Contains(err.Error(), `value "n"`)
 		})
 	}
-	var dst struct {
+
+	var in struct {
 		Role textID `value:"role"`
 	}
-	err := Bind(&dst, "value", lookup(map[string][]string{"role": {"unknown"}}))
-	assert.ErrorIs(t, err, errUnknownID)
-	assert.NotErrorIs(t, err, ErrInvalidTarget)
+	err := Bind(&in, "value", func(string) []string {
+		return []string{"unknown"}
+	})
+	ast := assert.New(t)
+	ast.ErrorIs(err, errUnknownID)
+	ast.NotErrorIs(err, ErrInvalidTarget)
 }
 
 func TestBindFailedPointerAndSlice(t *testing.T) {
 	original := 7
-	dst := struct {
+	in := struct {
 		N   *int  `value:"n"`
 		IDs []int `value:"id"`
 	}{N: &original, IDs: []int{1, 2}}
-	err := Bind(&dst, "value", lookup(map[string][]string{"n": {"bad"}}))
-	require.Error(t, err)
-	assert.Same(t, &original, dst.N)
-	err = Bind(&dst, "value", lookup(map[string][]string{"id": {"3", "bad"}}))
-	require.Error(t, err)
-	assert.Equal(t, []int{1, 2}, dst.IDs)
-	assert.Contains(t, err.Error(), "index 1")
-}
 
-type privateOptions struct {
-	Count int `value:"count"`
+	ast := assert.New(t)
+	err := Bind(&in, "value", func(string) []string {
+		return []string{"bad"}
+	})
+	if ast.Error(err) {
+		ast.Same(&original, in.N)
+	}
+
+	err = Bind(&in, "value", func(string) []string {
+		return []string{"3", "bad"}
+	})
+	if ast.Error(err) {
+		ast.Equal([]int{1, 2}, in.IDs)
+		ast.Contains(err.Error(), "index 1")
+	}
 }
 
 func TestBindInvalidTargets(t *testing.T) {
+	type privateOptions struct {
+		Count int `value:"count"`
+	}
+
 	tests := []struct {
 		name string
 		dst  any
@@ -188,48 +239,99 @@ func TestBindInvalidTargets(t *testing.T) {
 		{"non-pointer struct", struct{}{}},
 		{"nil struct pointer", (*struct{})(nil)},
 		{"non-struct pointer", new(int)},
+		{"nested struct pointer", new(*struct{})},
 		{"unsupported field type", &struct {
 			N map[string]int `value:"n"`
 		}{}},
 		{"unexported embedded pointer", &struct{ *privateOptions }{}},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			err := Bind(test.dst, "value", lookup(map[string][]string{"n": {"1"}, "count": {"1"}}))
-			assert.ErrorIs(t, err, ErrInvalidTarget)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			values := map[string][]string{"n": {"1"}, "count": {"1"}}
+			err := Bind(tt.dst, "value", func(key string) []string {
+				return values[key]
+			})
+			ast := assert.New(t)
+			ast.ErrorIs(err, ErrInvalidTarget)
 		})
 	}
 }
 
 func TestBindEmbeddedFields(t *testing.T) {
-	values := lookup(map[string][]string{"limit": {"3"}, "count": {"4"}})
+	// Options must stay exported: reflect can only allocate an embedded
+	// pointer whose field name is exported.
+	type Options struct {
+		Limit *int `value:"limit"`
+	}
+
+	// privateOptions is unexported, so an embedded nil pointer to it is not
+	// settable, while its exported fields stay writable through a value.
+	type privateOptions struct {
+		Count int `value:"count"`
+	}
+
+	values := map[string][]string{"limit": {"3"}, "count": {"4"}}
+	lookup := func(key string) []string { return values[key] }
+
+	ast := assert.New(t)
+
 	var lazy struct{ *Options }
-	require.NoError(t, Bind(&lazy, "value", lookup(nil)))
-	assert.Nil(t, lazy.Options)
-	require.NoError(t, Bind(&lazy, "value", values))
-	require.NotNil(t, lazy.Options)
-	assert.Equal(t, 3, *lazy.Limit)
+	ast.NoError(Bind(&lazy, "value", nil))
+	ast.Nil(lazy.Options)
+	if ast.NoError(Bind(&lazy, "value", lookup)) {
+		ast.NotNil(lazy.Options)
+		ast.Equal(3, *lazy.Limit)
+	}
 
 	var ignored struct {
 		Options `value:"-"`
 	}
-	require.NoError(t, Bind(&ignored, "value", values))
-	assert.Nil(t, ignored.Limit)
+	ast.NoError(Bind(&ignored, "value", lookup))
+	ast.Nil(ignored.Limit)
 
 	// Exported children of an unexported embedded value remain writable.
 	var embedded struct{ privateOptions }
-	require.NoError(t, Bind(&embedded, "value", values))
-	assert.Equal(t, 4, embedded.Count)
+	if ast.NoError(Bind(&embedded, "value", lookup)) {
+		ast.Equal(4, embedded.Count)
+	}
 
 	initialized := struct{ *privateOptions }{privateOptions: &privateOptions{}}
-	require.NoError(t, Bind(&initialized, "value", values))
-	assert.Equal(t, 4, initialized.Count)
+	if ast.NoError(Bind(&initialized, "value", lookup)) {
+		ast.Equal(4, initialized.Count)
+	}
 
 	var shadowed struct {
 		Options
 		Limit int `value:"limit"`
 	}
-	require.NoError(t, Bind(&shadowed, "value", values))
-	assert.Equal(t, 3, shadowed.Limit)
-	assert.Nil(t, shadowed.Options.Limit)
+	if ast.NoError(Bind(&shadowed, "value", lookup)) {
+		ast.Equal(3, shadowed.Limit)
+		ast.Nil(shadowed.Options.Limit)
+	}
+}
+
+func ExampleDeref() {
+	count := 1
+	value, err := Deref(&count)
+	if err != nil {
+		panic(err)
+	}
+	value.SetInt(42)
+	fmt.Println(count)
+	// Output: 42
+}
+
+func ExampleBind() {
+	var config struct {
+		Host string `config:"host"`
+		Port int    `config:"port"`
+	}
+	values := map[string][]string{"host": {"localhost"}, "port": {"8080"}}
+	if err := Bind(&config, "config", func(key string) []string {
+		return values[key]
+	}); err != nil {
+		panic(err)
+	}
+	fmt.Println(config.Host, config.Port)
+	// Output: localhost 8080
 }
