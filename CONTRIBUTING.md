@@ -99,3 +99,42 @@ go test -race ./...
 - Say why a behavior is untested when it is.
 
 No DCO sign-off is required.
+
+## Releases
+
+Release automation uses the pinned
+[Release Actions](https://github.com/hainuoli/release-actions) action.
+
+1. Wait for pending Latest Changes runs to finish.
+2. In Actions, run **Prepare Release** from `main`. Enter an unused tag such as
+   `v0.1.0` and the intended publication date in `YYYY-MM-DD` format. An empty
+   date uses today in UTC.
+3. Review the generated `🔖 Prepare v0.1.0 release` PR. It moves the accumulated
+   CHANGELOG entries under the version heading and preserves Latest Changes.
+   The `release` label excludes the preparation PR from changelog entries.
+4. Wait for PR checks, merge it, and wait for the latest `main` CI to pass.
+5. Pull `main`, verify the date and release notes, and push an annotated tag:
+
+   ```sh
+   git switch main
+   git pull --ff-only origin main
+   git tag -a v0.1.0 -m "🔖 Release v0.1.0"
+   git push origin v0.1.0
+   ```
+
+The Release workflow validates and tests the tagged code on stable Go and the
+minimum supported Go version, then creates the GitHub Release from that tagged
+CHANGELOG section. Do not create a second Release manually or move a published
+tag; use a new version for corrections.
+
+Preparation uses `RELEASE_ACTIONS_TOKEN` when configured, otherwise the workflow's
+`GITHUB_TOKEN`. For automatic PR checks, provide a repository-scoped PAT or GitHub
+App token with Contents, Pull requests, and Issues write permissions. The default
+workflow token requires **Allow GitHub Actions to create and approve pull
+requests** in Actions settings; a PR created with it needs to be closed and
+reopened by a maintainer to trigger ordinary PR checks. Reopening does not modify
+the prepared changelog. The existing `LATEST_CHANGES_TOKEN` remains dedicated to
+default-branch release-note updates.
+
+To recover a partially completed preparation, rerun it with the same version and
+date. The action reuses an existing release PR without overwriting its edits.
