@@ -1,0 +1,40 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact tag to prepare (for example v0.1.0)
+        required: true
+        type: string
+      release-date:
+        description: Release date YYYY-MM-DD (empty means today in UTC)
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  # Share the repository queue with the Latest Changes workflow.
+  group: latest-changes-${{ github.repository }}
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # A scoped PAT or GitHub App token lets the new PR trigger CI automatically.
+      # With only github.token, enable workflow PR creation and run CI manually.
+      - uses: hainuoli/release-actions@deab1fd103d3e6f46e32a062c40247314dceeb29
+        with:
+          command: prepare-release
+          token: ${{ secrets.RELEASE_ACTIONS_TOKEN || github.token }}
+          version: ${{ inputs.version }}
+          release-date: ${{ inputs.release-date }}
+          # Set notes-file consistently in all three workflows if overriding detection.
+          notes-file: CHANGELOG.md
