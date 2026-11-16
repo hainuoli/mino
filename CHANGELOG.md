@@ -6,6 +6,8 @@ after the version.
 
 ## Latest Changes
 
+## 0.1.0 (2026-11-16)
+
 ### Features
 
 * ✨ Add httpx request and response helpers. PR [#9](https://github.com/hainuoli/mino/pull/9) by [@hainuoli](https://github.com/hainuoli).
