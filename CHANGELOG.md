@@ -27,6 +27,7 @@ after the version.
 
 ### Internal
 
+* 👷 Adopt shared release actions. PR [#12](https://github.com/hainuoli/mino/pull/12) by [@hainuoli](https://github.com/hainuoli).
 * ✅ Unify test style across packages. PR [#7](https://github.com/hainuoli/mino/pull/7) by [@hainuoli](https://github.com/hainuoli).
 * 👷 Configure Gitmoji labels and release-note credentials. PR [#3](https://github.com/hainuoli/mino/pull/3) by [@hainuoli](https://github.com/hainuoli).
 * 👷 Use Actions for changelog updates. Commit [`1282009`](https://github.com/hainuoli/mino/commit/12820090738a17999932928eeafbbbc12745fff1).
