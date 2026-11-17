@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
+	"net/textproto"
 	"strings"
 	"testing"
 	"time"
@@ -33,20 +35,70 @@ func TestRecorderCommitSemantics(t *testing.T) {
 	ast.Equal(http.StatusOK, rec.status())
 	ast.Equal(5, rec.bytes)
 
-	// Informational statuses pass through without committing, so a panic
-	// after 103 Early Hints can still produce the fallback response.
-	rec = newResponseRecorder(httptest.NewRecorder())
-	rec.WriteHeader(http.StatusEarlyHints)
-	ast.False(rec.committed())
-	_, err = rec.Write([]byte("x"))
-	ast.NoError(err)
-	ast.Equal(http.StatusOK, rec.status())
-
 	// Nothing written reads as the net/http implicit 200.
 	rec = newResponseRecorder(httptest.NewRecorder())
 	ast.False(rec.committed())
 	ast.Equal(http.StatusOK, rec.status())
 	ast.Equal(0, rec.bytes)
+}
+
+func TestRecorderInformationalResponses(t *testing.T) {
+	captureDefaultLogger(t)
+	tests := []struct {
+		name   string
+		panics bool
+		status int
+		body   string
+	}{
+		{"implicit final status", false, http.StatusOK, "x"},
+		{"panic fallback", true, http.StatusInternalServerError, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			// ResponseRecorder does not model multiple response statuses.
+			// Use a real server to verify both informational and final responses.
+			server := httptest.NewServer(Recovery()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				rec := newResponseRecorder(w)
+				rec.WriteHeader(http.StatusEarlyHints)
+				ast.False(rec.committed())
+				if tt.panics {
+					panic("after early hints")
+				}
+				n, err := rec.Write([]byte(tt.body))
+				ast.NoError(err)
+				ast.Equal(len(tt.body), n)
+				ast.True(rec.committed())
+				ast.Equal(tt.status, rec.status())
+				ast.Equal(len(tt.body), rec.bytes)
+			})))
+			defer server.Close()
+
+			hints := make(chan int, 1)
+			trace := &httptrace.ClientTrace{
+				Got1xxResponse: func(code int, _ textproto.MIMEHeader) error {
+					hints <- code
+					return nil
+				},
+			}
+			req, err := http.NewRequest(http.MethodGet, server.URL, nil)
+			require.NoError(t, err)
+			req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+			resp, err := server.Client().Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			ast.Equal(tt.status, resp.StatusCode)
+			ast.Equal(tt.body, string(body))
+			select {
+			case code := <-hints:
+				ast.Equal(http.StatusEarlyHints, code)
+			default:
+				t.Error("missing 103 Early Hints response")
+			}
+		})
+	}
 }
 
 func TestRecorderForwardsCapabilities(t *testing.T) {
