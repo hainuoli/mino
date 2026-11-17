@@ -84,7 +84,8 @@ type (
 		//	api := r.Route("/api")
 		//	api.Get("/ping", h)
 		//
-		// serves GET /api/ping. The prefix must be literal.
+		// serves GET /api/ping. The prefix must be literal. The subtree participates
+		// in normal path matching and owns requests delegated to it.
 		Route(prefix string) Router
 
 		// Mount attaches an external http.Handler, such as another router,
@@ -93,7 +94,8 @@ type (
 		//	r.Mount("/gin", ginEngine)
 		//
 		// requests under /gin are dispatched to the handler with
-		// the prefix stripped. The prefix must be literal.
+		// the prefix stripped. The prefix must be literal. The subtree participates
+		// in normal path matching, just like Route.
 		Mount(prefix string, handler http.Handler)
 
 		// Handle registers handler for pattern, which may carry its own method:
@@ -101,11 +103,11 @@ type (
 		//	r.Handle("/ping", h)     // any method
 		//	r.Handle("GET /ping", h) // GET only
 		//
-		// A pattern without a method is an any-method fallback; HEAD falls
-		// back to GET. Parameters occupy whole segments; {name...} is last
-		// only. A trailing slash matches a subtree; /path/{$} pins an exact
-		// slash. Invalid patterns and duplicate endpoints panic during
-		// registration.
+		// Paths are matched before methods. At each matching path, HEAD falls
+		// back to GET, then to a pattern without a method. Parameters occupy
+		// whole segments; {name...} is last only. A trailing slash matches a
+		// subtree; /path/{$} pins an exact slash. Invalid patterns and duplicate
+		// endpoints panic during registration.
 		Handle(pattern string, handler http.Handler)
 
 		// HandleFunc is Handle taking a function with the standard net/http signature:
@@ -125,7 +127,7 @@ type (
 		//
 		//	r.Handle("GET /ping", h)
 		//
-		// HEAD falls back to matching GET routes when no HEAD route matches.
+		// HEAD uses this handler when no HEAD handler is registered at this path.
 		Get(pattern string, handler func(http.ResponseWriter, *http.Request))
 
 		// Head registers fn for HEAD requests matching pattern:
