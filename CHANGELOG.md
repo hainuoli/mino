@@ -6,6 +6,10 @@ after the version.
 
 ## Latest Changes
 
+### Features
+
+* ✨ Add access logging and panic recovery middleware. PR [#17](https://github.com/hainuoli/mino/pull/17) by [@hainuoli](https://github.com/hainuoli).
+
 ## 0.1.1 (2026-11-17)
 
 ### Fixes
