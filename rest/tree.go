@@ -28,22 +28,18 @@ var (
 )
 
 type (
-	// methodTrees holds one radix tree per HTTP method; the empty
-	// string keys the tree matching any method.
-	methodTrees map[string]*node
-
 	// nodeTyp classifies tree segments: static prefixes, {name}
 	// parameters and {name...} catch-alls.
 	nodeTyp uint8
 
 	// node is a radix tree node sharing common prefixes with its
 	// siblings; static children live in a sparse array indexed by
-	// their first byte.
+	// their first byte. Each terminal maps HTTP methods to endpoints.
 	node struct {
-		prefix   string
-		endpoint *endpoint
-		typ      nodeTyp
-		base     byte
+		prefix    string
+		endpoints map[string]*endpoint
+		typ       nodeTyp
+		base      byte
 
 		children []*node
 		param    *node
@@ -89,13 +85,13 @@ func (n *node) addChild(c byte, child *node) {
 }
 
 // addEndpoint inserts an already parsed endpoint at its matching path.
-func (n *node) addEndpoint(path string, ep *endpoint, escaped bool) *endpoint {
+func (n *node) addEndpoint(method, path string, ep *endpoint, escaped bool) *endpoint {
 	from := 0
 	for i := 1; i <= len(path); {
 		end := segmentEnd(path, i)
 		seg := path[i:end]
 		if seg == "{$}" {
-			return n.insert(path[from:i]).setEndpoint(ep)
+			return n.insert(path[from:i]).setEndpoint(method, ep)
 		}
 		typ, _ := parseSegment(ep.pattern, seg, end == len(path))
 		if typ != ntStatic {
@@ -104,7 +100,7 @@ func (n *node) addEndpoint(path string, ep *endpoint, escaped bool) *endpoint {
 			}
 			n = n.insert(path[from:i]).wildChild(typ)
 			if typ == ntCatchAll || end == len(path) {
-				return n.setEndpoint(ep)
+				return n.setEndpoint(method, ep)
 			}
 			from = end
 		}
@@ -117,11 +113,11 @@ func (n *node) addEndpoint(path string, ep *endpoint, escaped bool) *endpoint {
 	if path[len(path)-1] == '/' {
 		n = n.wildChild(ntCatchAll)
 	}
-	return n.setEndpoint(ep)
+	return n.setEndpoint(method, ep)
 }
 
 // addRoutePath separates the original pattern from its internal matching key.
-func (n *node) addRoutePath(pattern, path string, handler http.Handler, escaped bool) *endpoint {
+func (n *node) addRoutePath(method, pattern, path string, handler http.Handler, escaped bool) *endpoint {
 	ep := &endpoint{handler: handler, pattern: pattern, paramKeys: parsePattern(pattern)}
 	if escaped {
 		// ServeMux treats {$} and a decoded trailing slash as the same
@@ -136,10 +132,10 @@ func (n *node) addRoutePath(pattern, path string, handler http.Handler, escaped 
 		if aliasPath != "" {
 			alias := *ep
 			alias.internal = true
-			n.addEndpoint(aliasPath, &alias, escaped)
+			n.addEndpoint(method, aliasPath, &alias, escaped)
 		}
 	}
-	return n.addEndpoint(path, ep, escaped)
+	return n.addEndpoint(method, path, ep, escaped)
 }
 
 // addSubRoutePath keeps mount metadata independent of the matching key.
@@ -154,25 +150,30 @@ func (n *node) addSubRoutePath(prefix, matchPath string, handler http.Handler) {
 		subtree = n.insert(matchPath + "/")
 	}
 
-	existing := exact.endpoint
+	var existing *endpoint
+	if prefix != "/" {
+		existing = exact.endpoints[allMethods]
+	}
 	if existing == nil && subtree.catchAll != nil {
-		existing = subtree.catchAll.endpoint
+		existing = subtree.catchAll.endpoints[allMethods]
 	}
 	if existing != nil {
 		panic(fmt.Errorf("mino: %w at mount prefix %q: conflicts with registered pattern %q", errDuplicate, prefix, existing.pattern))
 	}
 
-	exact.endpoint = &endpoint{
-		handler:  handler,
-		pattern:  prefix,
-		subroute: true,
+	entry := &endpoint{handler: handler, pattern: prefix, subroute: true}
+	if prefix == "/" {
+		// The root catch-all already matches both / and its descendants.
+		subtree.wildChild(ntCatchAll).setEndpoint(allMethods, entry)
+		return
 	}
-	subtree.wildChild(ntCatchAll).endpoint = &endpoint{
+	exact.setEndpoint(allMethods, entry)
+	subtree.wildChild(ntCatchAll).setEndpoint(allMethods, &endpoint{
 		handler:  handler,
 		pattern:  subtreePattern,
 		internal: true,
 		subroute: true,
-	}
+	})
 }
 
 // child returns the static child covering byte c, or nil.
@@ -198,7 +199,7 @@ func (n *node) insert(prefix string) *node {
 		n.addChild(prefix[0], child)
 		return child
 	}
-	if n.prefix == "" && n.endpoint == nil && len(n.children) == 0 && n.param == nil && n.catchAll == nil {
+	if n.prefix == "" && len(n.endpoints) == 0 && len(n.children) == 0 && n.param == nil && n.catchAll == nil {
 		n.prefix = prefix
 		return n
 	}
@@ -232,24 +233,25 @@ func (n *node) insert(prefix string) *node {
 }
 
 // match walks the tree recursively: static children win, then the
-// parameter child, then the catch-all; parameter values are written
-// into values at their depth.
-func (n *node) match(path string, values []string, depth int) (*endpoint, bool) {
+// parameter child, then the catch-all. A branch without a handler for the
+// method backtracks; parameter values are written into values at their depth.
+func (n *node) match(method, path string, values []string, depth int) (*endpoint, bool) {
 	for {
 		if len(path) < len(n.prefix) || len(n.prefix) > 1 && path[1:len(n.prefix)] != n.prefix[1:] {
 			return nil, false
 		}
 		path = path[len(n.prefix):]
 		if path == "" {
-			if n.endpoint != nil {
-				return n.endpoint, true
+			if ep := n.endpoint(method); ep != nil {
+				return ep, true
 			}
 			if catchAll := n.catchAll; catchAll != nil {
-				ep := catchAll.endpoint
-				if depth < len(ep.paramKeys) && depth < len(values) {
-					values[depth] = ""
+				if ep := catchAll.endpoint(method); ep != nil {
+					if depth < len(ep.paramKeys) && depth < len(values) {
+						values[depth] = ""
+					}
+					return ep, true
 				}
-				return ep, true
 			}
 			return nil, false
 		}
@@ -258,7 +260,7 @@ func (n *node) match(path string, values []string, depth int) (*endpoint, bool) 
 				n = next
 				continue
 			}
-			if ep, full := next.match(path, values, depth); ep != nil {
+			if ep, full := next.match(method, path, values, depth); ep != nil {
 				return ep, full
 			}
 		}
@@ -269,8 +271,8 @@ func (n *node) match(path string, values []string, depth int) (*endpoint, bool) 
 					values[depth] = path[:end]
 				}
 				if end == len(path) {
-					if param.endpoint != nil {
-						return param.endpoint, true
+					if ep := param.endpoint(method); ep != nil {
+						return ep, true
 					}
 				} else if len(param.children) != 0 {
 					next := param.children[0]
@@ -278,18 +280,19 @@ func (n *node) match(path string, values []string, depth int) (*endpoint, bool) 
 						n, path, depth = next, path[end:], depth+1
 						continue
 					}
-					if ep, full := next.match(path[end:], values, depth+1); ep != nil {
+					if ep, full := next.match(method, path[end:], values, depth+1); ep != nil {
 						return ep, full
 					}
 				}
 			}
 		}
 		if catchAll := n.catchAll; catchAll != nil {
-			ep := catchAll.endpoint
-			if depth < len(ep.paramKeys) && depth < len(values) {
-				values[depth] = path
+			if ep := catchAll.endpoint(method); ep != nil {
+				if depth < len(ep.paramKeys) && depth < len(values) {
+					values[depth] = path
+				}
+				return ep, false
 			}
-			return ep, false
 		}
 		return nil, false
 	}
@@ -298,7 +301,7 @@ func (n *node) match(path string, values []string, depth int) (*endpoint, bool) 
 // routes collects every visible endpoint into Route snapshots,
 // skipping internal endpoints and unwrapping mounted subtrees into
 // SubRoutes. Patterns are reported relative to basePath.
-func (n *node) routes(host, method, basePath string) []Route {
+func (n *node) routes(host, basePath string) []Route {
 	var routes []Route
 
 	var visit func(*node)
@@ -307,7 +310,10 @@ func (n *node) routes(host, method, basePath string) []Route {
 			return
 		}
 
-		if ep := n.endpoint; ep != nil && !ep.internal {
+		for method, ep := range n.endpoints {
+			if ep.internal {
+				continue
+			}
 			handler, mws := routeHandler(ep.handler)
 
 			var subRoutes Routes
@@ -343,20 +349,85 @@ func (n *node) routes(host, method, basePath string) []Route {
 // search matches path against the tree, filling values with the
 // parameter values in declaration order. The second result reports
 // a full match, as opposed to a catch-all prefix match.
-func (n *node) search(path string, values []string) (*endpoint, bool) {
-	if path == "" || path[0] != '/' {
+func (n *node) search(method, path string, values []string) (*endpoint, bool) {
+	if n == nil || path == "" || path[0] != '/' {
 		return nil, false
 	}
-	return n.match(path, values, 0)
+	return n.match(method, path, values, 0)
 }
 
-// setEndpoint attaches ep to the node, panicking on duplicates.
-func (n *node) setEndpoint(ep *endpoint) *endpoint {
-	if n.endpoint != nil {
-		panic(fmt.Errorf("mino: %w %q: conflicts with registered pattern %q", errDuplicate, ep.pattern, n.endpoint.pattern))
+// setEndpoint attaches ep for method, panicking on duplicate method/path pairs.
+func (n *node) setEndpoint(method string, ep *endpoint) *endpoint {
+	if existing := n.endpoints[method]; existing != nil {
+		panic(fmt.Errorf("mino: %w %q: conflicts with registered pattern %q", errDuplicate, ep.pattern, existing.pattern))
 	}
-	n.endpoint = ep
+	if n.endpoints == nil {
+		n.endpoints = make(map[string]*endpoint)
+	}
+	n.endpoints[method] = ep
 	return ep
+}
+
+// endpoint selects a method at this path. HEAD falls back to GET, then
+// both fall back to an any-method handler at the same terminal.
+func (n *node) endpoint(method string) *endpoint {
+	if ep := n.endpoints[method]; ep != nil {
+		return ep
+	}
+	if method == http.MethodHead {
+		if ep := n.endpoints[http.MethodGet]; ep != nil {
+			return ep
+		}
+	}
+	return n.endpoints[allMethods]
+}
+
+// matchingMethods visits every path branch that can match, collecting method
+// keys from its terminals. Like search, it keeps escaped slashes in their segment.
+func (n *node) matchingMethods(path, exclude string, allowed map[string]struct{}) {
+	if n == nil || path == "" || path[0] != '/' {
+		return
+	}
+	n.collectMethods(path, exclude, allowed)
+}
+
+func (n *node) collectMethods(path, exclude string, allowed map[string]struct{}) {
+	if len(path) < len(n.prefix) || len(n.prefix) > 1 && path[1:len(n.prefix)] != n.prefix[1:] {
+		return
+	}
+	path = path[len(n.prefix):]
+	if path == "" {
+		n.allowMethods(exclude, allowed)
+	} else {
+		if next := n.child(path[0]); next != nil {
+			next.collectMethods(path, exclude, allowed)
+		}
+		if param := n.param; param != nil {
+			end := segmentEnd(path, 0)
+			if end > 0 && (param.typ != ntEscapedParam || path[:end] != "%2F") {
+				if end == len(path) {
+					param.allowMethods(exclude, allowed)
+				} else if len(param.children) != 0 {
+					param.children[0].collectMethods(path[end:], exclude, allowed)
+				}
+			}
+		}
+	}
+	if n.catchAll != nil {
+		n.catchAll.allowMethods(exclude, allowed)
+	}
+}
+
+func (n *node) allowMethods(exclude string, allowed map[string]struct{}) {
+	for method := range n.endpoints {
+		if method == allMethods || method == exclude {
+			continue
+		}
+		allowed[method] = struct{}{}
+		if method == http.MethodGet {
+			allowed[http.MethodHead] = struct{}{}
+		}
+	}
 }
 
 // wildChild returns the parameter or catch-all child, creating it

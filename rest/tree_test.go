@@ -27,7 +27,8 @@ func (n *node) addRoute(pattern string, handler http.Handler) *endpoint {
 	if start < 0 {
 		panic(fmt.Errorf("mino: %w: %q", errInvalidRoot, pattern))
 	}
-	return n.addRoutePath(pattern, pattern[start:], handler, false)
+	method := strings.TrimSpace(pattern[:start])
+	return n.addRoutePath(method, pattern, pattern[start:], handler, false)
 }
 
 // addSubRoute is a test shorthand mounting handler at the normalized
@@ -74,13 +75,13 @@ func TestAddSubRoute(t *testing.T) {
 	n := &node{}
 	n.addSubRoute("/api", noop)
 
-	ep, full := n.search("/api", nil)
+	ep, full := n.search(http.MethodGet, "/api", nil)
 	if ast.NotNil(ep) {
 		ast.True(ep.subroute)
 		ast.True(full)
 	}
 
-	ep, full = n.search("/api/users", nil)
+	ep, full = n.search(http.MethodGet, "/api/users", nil)
 	if ast.NotNil(ep) {
 		ast.True(ep.internal)
 		ast.False(full)
@@ -103,15 +104,16 @@ func TestAddSubRouteRoot(t *testing.T) {
 
 	n.addSubRoute("/", noop)
 
-	ep, full := n.search("/", nil)
+	ep, full := n.search(http.MethodGet, "/", nil)
 	if ast.NotNil(ep) {
 		ast.True(ep.subroute)
 		ast.True(full)
 	}
 
-	ep, _ = n.search("/deep", nil)
+	// The root mount uses the same public catch-all for every descendant.
+	ep, _ = n.search(http.MethodGet, "/deep", nil)
 	if ast.NotNil(ep) {
-		ast.True(ep.internal)
+		ast.False(ep.internal)
 	}
 }
 
@@ -147,7 +149,7 @@ func TestRoutes(t *testing.T) {
 		return byPattern
 	}
 
-	routes := n.routes("", http.MethodGet, "")
+	routes := n.routes("", "")
 	ast.Len(routes, 3)
 
 	byPattern := index(routes)
@@ -168,7 +170,7 @@ func TestRoutes(t *testing.T) {
 		ast.Equal(sub, r.SubRoutes)
 	}
 
-	byPattern = index(n.routes("", http.MethodGet, "/api"))
+	byPattern = index(n.routes("", "/api"))
 	for _, pattern := range []string{"/", "/ping", "/users"} {
 		ast.Contains(byPattern, pattern)
 	}
@@ -215,7 +217,7 @@ func TestSearchRoute(t *testing.T) {
 			}
 
 			values := make([]string, 16)
-			ep, full := n.search(tt.path, values)
+			ep, full := n.search(http.MethodGet, tt.path, values)
 			if tt.want == "" {
 				ast.Nil(ep)
 				return
@@ -242,14 +244,14 @@ func TestSearchSubrouteCatchAll(t *testing.T) {
 
 	// After the parameter branch is exhausted, fall back to the
 	// mounted catch-all on the same node.
-	ep, full := n.search("/api/52/rest", values)
+	ep, full := n.search(http.MethodGet, "/api/52/rest", values)
 	if ast.NotNil(ep) {
 		ast.True(ep.internal)
 		ast.False(full)
 	}
 
 	// A hit on the parameter branch's child wins over the catch-all.
-	ep, full = n.search("/api/52/x", values)
+	ep, full = n.search(http.MethodGet, "/api/52/x", values)
 	if ast.NotNil(ep) {
 		ast.False(ep.internal)
 		ast.True(full)
@@ -262,11 +264,11 @@ func TestSearchRejectsBarePath(t *testing.T) {
 	n := &node{}
 	n.addRoute("/ping", noop)
 
-	ep, full := n.search("", nil)
+	ep, full := n.search(http.MethodGet, "", nil)
 	ast.Nil(ep)
 	ast.False(full)
 
-	ep, full = n.search("ping", nil)
+	ep, full = n.search(http.MethodGet, "ping", nil)
 	ast.Nil(ep)
 	ast.False(full)
 }

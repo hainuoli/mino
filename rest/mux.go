@@ -37,8 +37,8 @@ type (
 	// Finish configuration before serving; registration and middleware
 	// changes must not run concurrently with requests.
 	Mux struct {
-		trees methodTrees
-		hosts map[string]methodTrees
+		tree  *node
+		hosts map[string]*node
 
 		// mws is the local stack built by Use.
 		mws []chain.Middleware
@@ -179,7 +179,7 @@ func (m *Mux) Handler(r *http.Request) (http.Handler, string) {
 		}
 	}
 
-	_, matched, exact := m.match(host, r.Method, requestPath, nil)
+	matched, exact := m.match(host, r.Method, requestPath, nil)
 	slashPath := ""
 	if clean || (!exact && (matched == nil || !matched.subroute)) {
 		var pattern, location string
@@ -215,13 +215,9 @@ func (m *Mux) Handler(r *http.Request) (http.Handler, string) {
 // complete leaf paths.
 func (m *Mux) Routes() []Route {
 	var routes []Route
-	for method, n := range m.trees {
-		routes = append(routes, n.routes("", method, m.basePath)...)
-	}
-	for host, trees := range m.hosts {
-		for method, n := range trees {
-			routes = append(routes, n.routes(host, method, m.basePath)...)
-		}
+	routes = append(routes, m.tree.routes("", m.basePath)...)
+	for host, n := range m.hosts {
+		routes = append(routes, n.routes(host, m.basePath)...)
 	}
 	sort.Slice(routes, func(i, j int) bool {
 		a, b := routes[i], routes[j]
@@ -305,7 +301,8 @@ func (m *Mux) With(mws ...chain.Middleware) Router {
 //	api := r.Route("/api")
 //	api.Get("/ping", h)
 //
-// serves GET /api/ping. The prefix must be literal.
+// serves GET /api/ping. The prefix must be literal. The subtree participates
+// in normal path matching and owns requests delegated to it.
 func (m *Mux) Route(prefix string) Router {
 	prefix = normalizePrefix(prefix)
 	child := NewMuxWithConf(m.conf)
@@ -331,7 +328,8 @@ func (m *Mux) Route(prefix string) Router {
 //	r.Mount("/gin", ginEngine)
 //
 // requests under /gin are dispatched to the handler with
-// the prefix stripped. The prefix must be literal.
+// the prefix stripped. The prefix must be literal. The subtree participates
+// in normal path matching, just like Route.
 func (m *Mux) Mount(prefix string, handler http.Handler) {
 	if handler == nil {
 		panic(fmt.Errorf("mino: %w for prefix %q", errNilMountHandler, prefix))
@@ -357,10 +355,11 @@ func (m *Mux) Mount(prefix string, handler http.Handler) {
 //	r.Handle("/ping", h)     // any method
 //	r.Handle("GET /ping", h) // GET only
 //
-// A pattern without a method is an any-method fallback; HEAD falls back
-// to GET. Parameters occupy whole segments; {name...} is last only. A
-// trailing slash matches a subtree; /path/{$} pins an exact slash.
-// Invalid patterns and duplicate endpoints panic during registration.
+// Paths are matched before methods. At each matching path, HEAD falls
+// back to GET, then to a pattern without a method. Parameters occupy
+// whole segments; {name...} is last only. A trailing slash matches a
+// subtree; /path/{$} pins an exact slash. Invalid patterns and duplicate
+// endpoints panic during registration.
 func (m *Mux) Handle(pattern string, handler http.Handler) {
 	original := pattern
 	method := allMethods
@@ -393,7 +392,7 @@ func (m *Mux) HandleFunc(pattern string, handler func(http.ResponseWriter, *http
 //
 //	r.Handle("GET /ping", h)
 //
-// HEAD falls back to matching GET routes when no HEAD route matches.
+// HEAD uses this handler when no HEAD handler is registered at this path.
 func (m *Mux) Get(pattern string, handler func(http.ResponseWriter, *http.Request)) {
 	m.Handle(http.MethodGet+" "+pattern, http.HandlerFunc(handler))
 }
@@ -523,7 +522,7 @@ func (m *Mux) MethodNotAllowed(handler http.HandlerFunc) {
 	m.notAllowed = handler
 }
 
-// handle registers the dispatch handler on the owner trees, splitting
+// handle registers the dispatch handler on the owner tree, splitting
 // an optional host prefix and applying the base path.
 func (m *Mux) handle(method, pattern, original string, handler http.Handler) {
 	if pattern == "" {
@@ -553,7 +552,7 @@ func (m *Mux) handle(method, pattern, original string, handler http.Handler) {
 	owner, dispatch := m.prepare(pattern, handler)
 
 	for target := owner; target != nil; target = target.parent {
-		ep := target.routeTree(host, method).addRoutePath(pattern, matchPath, dispatch, m.conf.EscapedPath)
+		ep := target.routeTree(host).addRoutePath(method, pattern, matchPath, dispatch, m.conf.EscapedPath)
 		ep.internal = target != owner
 		if host == "" || target.parent == nil {
 			break
@@ -575,7 +574,7 @@ func (m *Mux) attach(prefix string, entry *ChainHandler) {
 	if m.conf.EscapedPath {
 		matchPath = escapedMatchPath(prefix, true)
 	}
-	owner.routeTree("", allMethods).addSubRoutePath(prefix, matchPath, entry)
+	owner.routeTree("").addSubRoutePath(prefix, matchPath, entry)
 }
 
 // prepare resolves the owner mux of a new route and wraps the
@@ -648,30 +647,22 @@ func normalizePrefix(prefix string) string {
 	return prefix
 }
 
-// routeTree returns the tree for host and method, creating it on
-// first use; an empty host selects the global trees.
-func (m *Mux) routeTree(host, method string) *node {
-	trees := m.trees
-	if host != "" {
-		if m.hosts == nil {
-			m.hosts = make(map[string]methodTrees)
+// routeTree returns the host's path tree, creating it on first use.
+// An empty host selects the global tree; methods live at path terminals.
+func (m *Mux) routeTree(host string) *node {
+	if host == "" {
+		if m.tree == nil {
+			m.tree = new(node)
 		}
-		trees = m.hosts[host]
-		if trees == nil {
-			trees = make(methodTrees)
-			m.hosts[host] = trees
-		}
-	} else if trees == nil {
-		trees = make(methodTrees)
-		m.trees = trees
+		return m.tree
 	}
-
-	n := trees[method]
-	if n == nil {
-		n = new(node)
-		trees[method] = n
+	if m.hosts == nil {
+		m.hosts = make(map[string]*node)
 	}
-	return n
+	if m.hosts[host] == nil {
+		m.hosts[host] = new(node)
+	}
+	return m.hosts[host]
 }
 
 // withBase joins an absolute value onto the mux base path; callers pass
@@ -847,7 +838,7 @@ func (m *Mux) routeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	if len(m.trees) == 0 && len(m.hosts) == 0 && !m.conf.CleanPathRedirect {
+	if m.tree == nil && len(m.hosts) == 0 && !m.conf.CleanPathRedirect {
 		if r.Pattern != "" {
 			clearRouteValues(r)
 		}
@@ -875,7 +866,7 @@ func (m *Mux) routeHTTP(w http.ResponseWriter, r *http.Request) {
 	if connect && m.connectRedirect(w, r, requestPath) {
 		return
 	}
-	n, matched, exact := m.match(host, r.Method, requestPath, values)
+	matched, exact := m.match(host, r.Method, requestPath, values)
 	slashPath := ""
 	// A Route/Mount entry delegates the request; the child owns its redirects.
 	// A normal catch-all remains inexact and must allow a more specific slash probe.
@@ -889,7 +880,7 @@ func (m *Mux) routeHTTP(w http.ResponseWriter, r *http.Request) {
 	if matched != nil {
 		if len(matched.paramKeys) > len(values) {
 			values = make([]string, len(matched.paramKeys))
-			matched, _ = n.search(requestPath, values)
+			matched, _ = m.match(host, r.Method, requestPath, values)
 		}
 		if r.Pattern != "" && r.Pattern != matched.pattern && strings.IndexByte(r.Pattern, '{') >= 0 {
 			clearRouteValues(r)
@@ -936,7 +927,7 @@ func (m *Mux) redirectMatch(w http.ResponseWriter, r *http.Request, host, reques
 func (m *Mux) redirectTarget(r *http.Request, host, requestPath, targetPath string, matched *endpoint, clean, exact bool) (slashPath, pattern, location string) {
 	if !exact && r.Method != http.MethodConnect && m.conf.TrailingSlashRedirect && !strings.HasSuffix(requestPath, "/") {
 		slashPath = requestPath + "/"
-		if _, ep, full := m.match(host, r.Method, slashPath, nil); ep != nil && full {
+		if ep, full := m.match(host, r.Method, slashPath, nil); ep != nil && full {
 			if targetPath == "" {
 				targetPath = r.URL.EscapedPath()
 			}
@@ -1054,11 +1045,11 @@ func (m *Mux) connectRedirectPath(r *http.Request, requestPath string) string {
 	if !m.conf.TrailingSlashRedirect || strings.HasSuffix(requestPath, "/") {
 		return ""
 	}
-	_, _, exact := m.match(r.URL.Host, r.Method, requestPath, nil)
+	_, exact := m.match(r.URL.Host, r.Method, requestPath, nil)
 	if exact {
 		return ""
 	}
-	if _, ep, full := m.match(r.URL.Host, r.Method, requestPath+"/", nil); ep != nil && full {
+	if ep, full := m.match(r.URL.Host, r.Method, requestPath+"/", nil); ep != nil && full {
 		return cleanPath(r.URL.Path) + "/"
 	}
 	return ""
@@ -1094,50 +1085,36 @@ func clearRouteValues(r *http.Request) {
 }
 
 // match resolves the endpoint from host-scoped trees first, then
-// from the global ones.
-func (m *Mux) match(host, method, path string, values []string) (*node, *endpoint, bool) {
+// from the global tree.
+func (m *Mux) match(host, method, path string, values []string) (*endpoint, bool) {
 	if host != "" {
-		if n, ep, full := matchTrees(m.hosts[host], method, path, values); ep != nil {
-			return n, ep, full
+		if ep, full := m.hosts[host].search(method, path, values); ep != nil {
+			return ep, full
 		}
 	}
-	return matchTrees(m.trees, method, path, values)
+	return m.tree.search(method, path, values)
 }
 
-// allowedMethods collects the methods that could still match
-// requestPath for the Allow header; a registered GET allows HEAD.
+// allowedMethods collects method keys from every matching path terminal;
+// a registered GET allows HEAD. Probes never populate request captures.
 func (m *Mux) allowedMethods(host, excludeMethod, requestPath, slashPath string) []string {
-	allowed := make(map[string]struct{}, len(m.trees)+len(m.hosts[host])+1)
-
-	collect := func(trees methodTrees) {
-		for candidateMethod, n := range trees {
-			if candidateMethod == allMethods || candidateMethod == excludeMethod {
-				continue
-			}
-			ep, _ := n.search(requestPath, nil)
-			if ep == nil && slashPath != "" {
-				ep, _ = n.search(slashPath, nil)
-			}
-			if ep == nil {
-				continue
-			}
-			allowed[candidateMethod] = struct{}{}
-			if candidateMethod == http.MethodGet {
-				allowed[http.MethodHead] = struct{}{}
-			}
+	allowed := make(map[string]struct{})
+	collect := func(n *node) {
+		n.matchingMethods(requestPath, excludeMethod, allowed)
+		if slashPath != "" {
+			n.matchingMethods(slashPath, excludeMethod, allowed)
 		}
 	}
 	if host != "" {
 		collect(m.hosts[host])
 	}
-	collect(m.trees)
-
+	collect(m.tree)
 	if len(allowed) == 0 {
 		return nil
 	}
 	methods := make([]string, 0, len(allowed))
-	for allowedMethod := range allowed {
-		methods = append(methods, allowedMethod)
+	for method := range allowed {
+		methods = append(methods, method)
 	}
 	sort.Strings(methods)
 	return methods
@@ -1169,29 +1146,6 @@ func (m *Mux) methodNotAllowedHandler() http.HandlerFunc {
 			http.StatusMethodNotAllowed,
 		)
 	}
-}
-
-// matchTrees searches trees for method, falling back from HEAD to
-// GET and finally to the any-method tree.
-func matchTrees(trees methodTrees, method, path string, values []string) (*node, *endpoint, bool) {
-	if n := trees[method]; n != nil {
-		if ep, full := n.search(path, values); ep != nil {
-			return n, ep, full
-		}
-	}
-	if method == http.MethodHead {
-		if n := trees[http.MethodGet]; n != nil {
-			if ep, full := n.search(path, values); ep != nil {
-				return n, ep, full
-			}
-		}
-	}
-	if n := trees[allMethods]; n != nil {
-		if ep, full := n.search(path, values); ep != nil {
-			return n, ep, full
-		}
-	}
-	return nil, nil, false
 }
 
 // validMethod reports whether method is a valid HTTP token.
