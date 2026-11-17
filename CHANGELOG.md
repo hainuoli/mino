@@ -6,6 +6,8 @@ after the version.
 
 ## Latest Changes
 
+## 0.1.1 (2026-11-17)
+
 ### Fixes
 
 * 🐛 Fix path precedence in route matching. PR [#15](https://github.com/hainuoli/mino/pull/15) by [@hainuoli](https://github.com/hainuoli).
