@@ -12,6 +12,7 @@ after the version.
 
 ### Features
 
+* ✨ Add Stream response helper to httpx. PR [#19](https://github.com/hainuoli/mino/pull/19) by [@hainuoli](https://github.com/hainuoli).
 * ✨ Add access logging and panic recovery middleware. PR [#17](https://github.com/hainuoli/mino/pull/17) by [@hainuoli](https://github.com/hainuoli).
 
 ## 0.1.1 (2026-11-17)
