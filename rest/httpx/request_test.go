@@ -1,19 +1,24 @@
 package httpx
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/hainuoli/mino/core/mapping"
 	"github.com/hainuoli/mino/rest"
+	"github.com/hainuoli/mino/rest/middleware"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -354,7 +359,7 @@ func TestMuxIntegration(t *testing.T) {
 			Err(w, r, err)
 			return
 		}
-		OkJSONCtx(r.Context(), w, map[string]string{"id": req.ID, "name": req.Name})
+		OkCtx(r.Context(), w, map[string]string{"id": req.ID, "name": req.Name})
 	}
 	mino := rest.NewMux()
 	mino.Post("/users/{id}", handler)
@@ -467,15 +472,15 @@ func TestParseSourceErrors(t *testing.T) {
 			}{},
 		},
 		{
-			name: "form target must be a struct", parse: ParseForm, status: 500,
+			name: "form target must be a struct", parse: func(r *http.Request, v any) error { return ParseForm(r, v) }, status: 500,
 			setup: func(*http.Request) {}, target: new(int),
 		},
 		{
-			name: "form target must be nonnil", parse: ParseForm, status: 500,
+			name: "form target must be nonnil", parse: func(r *http.Request, v any) error { return ParseForm(r, v) }, status: 500,
 			setup: func(*http.Request) {}, target: (*struct{})(nil),
 		},
 		{
-			name: "form input error precedes target error", parse: ParseForm, status: 400,
+			name: "form input error precedes target error", parse: func(r *http.Request, v any) error { return ParseForm(r, v) }, status: 400,
 			setup: func(r *http.Request) { r.URL.RawQuery = "count=%zz" }, target: new(int),
 		},
 	}
@@ -525,6 +530,377 @@ func TestParseJSONInvalidTarget(t *testing.T) {
 			ast.Zero(body.reads)
 		})
 	}
+}
+
+type uploadFile struct{ field, name, body string }
+
+func multipartRequest(t *testing.T, fields map[string][]string, files ...uploadFile) *http.Request {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	for name, values := range fields {
+		for _, value := range values {
+			require.NoError(t, writer.WriteField(name, value))
+		}
+	}
+	for _, file := range files {
+		part, err := writer.CreateFormFile(file.field, file.name)
+		require.NoError(t, err)
+		_, err = io.WriteString(part, file.body)
+		require.NoError(t, err)
+	}
+	require.NoError(t, writer.Close())
+	r := httptest.NewRequest("POST", "/", &body)
+	r.Header.Set("Content-Type", writer.FormDataContentType())
+	t.Cleanup(func() {
+		if r.MultipartForm != nil {
+			require.NoError(t, r.MultipartForm.RemoveAll())
+		}
+	})
+	return r
+}
+
+func multipartTempDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(key, dir)
+	}
+	return dir
+}
+
+func fileContents(t *testing.T, header *multipart.FileHeader) string {
+	t.Helper()
+	f, err := header.Open()
+	require.NoError(t, err)
+	defer f.Close()
+	data, err := io.ReadAll(f)
+	require.NoError(t, err)
+	return string(data)
+}
+
+func TestParseMultipartSources(t *testing.T) {
+	ast := assert.New(t)
+	type Files struct {
+		Cover *multipart.FileHeader `form:"cover" json:"-"`
+	}
+	var in struct {
+		*Files
+		Title       string                  `form:"title" json:"-"`
+		Tags        []string                `form:"tag" json:"-"`
+		Attachments []*multipart.FileHeader `form:"files" json:"-"`
+		Page        int                     `query:"page" json:"-"`
+		Trace       string                  `header:"X-Trace" json:"-"`
+		ID          int                     `path:"id" json:"-"`
+	}
+	r := multipartRequest(t, map[string][]string{"title": {"Mino"}, "tag": {"go", "web"}},
+		uploadFile{"cover", "first.txt", "first"}, uploadFile{"cover", "second.txt", "second"},
+		uploadFile{"files", "a.txt", "a"}, uploadFile{"files", "b.txt", "b"})
+	r.URL.RawQuery = "page=2&cover=spoof&files=spoof"
+	r.Header.Set("X-Trace", "trace")
+	r.SetPathValue("id", "42")
+	require.NoError(t, Parse(r, &in))
+	ast.Equal("Mino", in.Title)
+	ast.Equal([]string{"go", "web"}, in.Tags)
+	ast.Equal(2, in.Page)
+	ast.Equal("trace", in.Trace)
+	ast.Equal(42, in.ID)
+	require.NotNil(t, in.Files)
+	require.NotNil(t, in.Cover)
+	ast.Equal("first.txt", in.Cover.Filename)
+	ast.Equal("first", fileContents(t, in.Cover))
+	require.Len(t, in.Attachments, 2)
+	ast.Equal("a", fileContents(t, in.Attachments[0]))
+	ast.Equal("b", fileContents(t, in.Attachments[1]))
+	in.Attachments[0] = nil
+	ast.NotNil(r.MultipartForm.File["files"][0])
+}
+
+func TestParseMultipartAbsentFiles(t *testing.T) {
+	ast := assert.New(t)
+	type Files struct {
+		File *multipart.FileHeader `form:"file" json:"-"`
+	}
+	var absent struct{ *Files }
+	r := multipartRequest(t, map[string][]string{"file": {"text"}})
+	r.URL.RawQuery = "file=query"
+	require.NoError(t, Parse(r, &absent))
+	ast.Nil(absent.Files)
+	existing := &multipart.FileHeader{Filename: "existing"}
+	in := struct {
+		File *multipart.FileHeader `form:"file"`
+	}{existing}
+	require.NoError(t, ParseForm(r, &in))
+	ast.Same(existing, in.File)
+}
+
+type validatedUpload struct {
+	File   *multipart.FileHeader `form:"file" json:"-"`
+	called bool
+	err    error
+}
+
+func (v *validatedUpload) Validate() error { v.called = true; return v.err }
+
+func TestParseMultipartValidationAndDiskLifetime(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"success", nil},
+		{"invalid", errors.New("rejected")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			multipartTempDir(t)
+			r := multipartRequest(t, nil, uploadFile{"file", "data.txt", "content"})
+			original := r.Body
+			in := validatedUpload{err: tt.err}
+			err := Parse(r, &in, WithMultipartMemory(0))
+			if tt.err == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, tt.err)
+				status, _ := DefaultErrorHandler(r, err)
+				ast.Equal(400, status)
+			}
+			ast.True(in.called)
+			ast.True(original == r.Body)
+			require.NotNil(t, in.File)
+			f, err := in.File.Open()
+			require.NoError(t, err)
+			_, onDisk := f.(*os.File)
+			ast.True(onDisk)
+			require.NoError(t, f.Close())
+			ast.Equal("content", fileContents(t, in.File))
+			require.NoError(t, r.MultipartForm.RemoveAll())
+			_, err = in.File.Open()
+			ast.ErrorIs(err, os.ErrNotExist)
+		})
+	}
+}
+
+func TestParseMultipartOptions(t *testing.T) {
+	for name, parse := range map[string]func(*http.Request, any, ...ParseOption) error{
+		"Parse": Parse, "ParseForm": ParseForm,
+	} {
+		t.Run(name, func(t *testing.T) {
+			tests := []struct {
+				name      string
+				opts      []ParseOption
+				preparsed bool
+				status    int
+				disk      bool
+			}{
+				{name: "disk", opts: []ParseOption{nil, WithMultipartMemory(0)}, disk: true},
+				{name: "negative", opts: []ParseOption{WithMultipartMemory(-1)}, status: 500},
+				{name: "preparsed", opts: []ParseOption{WithMultipartMemory(0)}, preparsed: true},
+			}
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					ast := assert.New(t)
+					r := multipartRequest(t, nil, uploadFile{"file", "data.txt", "content"})
+					if tt.preparsed {
+						require.NoError(t, r.ParseMultipartForm(1024))
+					}
+					body := &observedBody{Reader: r.Body}
+					r.Body = body
+					var in validatedUpload
+					err := parse(r, &in, tt.opts...)
+					ast.Zero(body.closes)
+					if tt.status != 0 {
+						require.Error(t, err)
+						status, _ := DefaultErrorHandler(r, err)
+						ast.Equal(tt.status, status)
+						ast.Zero(body.reads)
+						return
+					}
+					require.NoError(t, err)
+					require.NotNil(t, in.File)
+					f, err := in.File.Open()
+					require.NoError(t, err)
+					_, disk := f.(*os.File)
+					ast.Equal(tt.disk, disk)
+					require.NoError(t, f.Close())
+					ast.Equal(name == "Parse", in.called)
+				})
+			}
+		})
+	}
+}
+
+func TestParseMultipartBadInput(t *testing.T) {
+	tests := []struct{ name, contentType, body string }{
+		{"missing boundary", "multipart/form-data", "invalid"},
+		{"truncated", "multipart/form-data; boundary=test", "--test\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\nvalue"},
+		{"invalid type", "multipart/form-data; broken", "invalid"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			r := httptest.NewRequest("POST", "/", strings.NewReader(tt.body))
+			r.Header.Set("Content-Type", tt.contentType)
+			var in struct{}
+			err := ParseForm(r, &in)
+			require.Error(t, err)
+			status, _ := DefaultErrorHandler(r, err)
+			ast.Equal(400, status)
+		})
+	}
+}
+
+func TestParseMultipartInvalidTarget(t *testing.T) {
+	r := multipartRequest(t, nil, uploadFile{"file", "data.txt", "content"})
+	var unsupported struct {
+		File multipart.FileHeader `form:"file"`
+	}
+	require.ErrorIs(t, ParseForm(r, &unsupported), mapping.ErrInvalidTarget)
+}
+
+func TestParseMultipartReadFailures(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		status int
+	}{
+		{"canceled", context.Canceled, 499},
+		{"truncated", io.ErrUnexpectedEOF, 400},
+		{"transport", errors.New("transport failed"), 500},
+		{"deadline", context.DeadlineExceeded, 500},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			r := httptest.NewRequest("POST", "/", failedReader{tt.err})
+			r.Header.Set("Content-Type", "multipart/form-data; boundary=test")
+			var in struct{}
+			err := ParseForm(r, &in)
+			require.ErrorIs(t, err, tt.err)
+			status, _ := DefaultErrorHandler(r, err)
+			ast.Equal(tt.status, status)
+		})
+	}
+}
+
+func TestParseMultipartLimitsAndCleanupWithClonedRequests(t *testing.T) {
+	tests := []struct {
+		path   string
+		status int
+	}{
+		{"/mounted/upload", 200},
+		{"/clone", 200},
+		{"/limited", 413},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			ast := assert.New(t)
+			dir := multipartTempDir(t)
+			handler := func(w http.ResponseWriter, r *http.Request) {
+				defer func() {
+					if r.MultipartForm != nil {
+						ast.NoError(r.MultipartForm.RemoveAll())
+					}
+				}()
+				var in validatedUpload
+				if err := Parse(r, &in, WithMultipartMemory(0)); err != nil {
+					Err(w, r, err)
+					return
+				}
+				Ok(w, map[string]string{"contents": fileContents(t, in.File)})
+			}
+			mux := rest.NewMux()
+			// A mount creates a request copy; cleanup belongs to the actual handler.
+			child := rest.NewMux()
+			child.Post("/upload", handler)
+			mux.Mount("/mounted", child)
+			mux.With(middleware.RequestSize(512)).Post("/limited", handler)
+			mux.Post("/clone", func(w http.ResponseWriter, r *http.Request) {
+				handler(w, r.WithContext(r.Context()))
+			})
+			r := multipartRequest(t, nil, uploadFile{"file", "data.txt", strings.Repeat("x", 2048)})
+			r.URL.Path, r.RequestURI = tt.path, tt.path
+			r.ContentLength = -1
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, r)
+			ast.Equal(tt.status, w.Code)
+			entries, err := os.ReadDir(dir)
+			require.NoError(t, err)
+			ast.Empty(entries)
+		})
+	}
+}
+
+func TestParseMultipartChunkedHTTP(t *testing.T) {
+	ast := assert.New(t)
+	server := httptest.NewServer(middleware.RequestSize(64)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if r.MultipartForm != nil {
+				_ = r.MultipartForm.RemoveAll()
+			}
+		}()
+		var in validatedUpload
+		if err := Parse(r, &in); err != nil {
+			Err(w, r, err)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})))
+	defer server.Close()
+	r := multipartRequest(t, nil, uploadFile{"file", "data.txt", strings.Repeat("x", 2048)})
+	req, err := http.NewRequest("POST", server.URL, struct{ io.Reader }{r.Body})
+	require.NoError(t, err)
+	req.Header = r.Header
+	ast.EqualValues(0, req.ContentLength)
+	resp, err := server.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	ast.Equal(413, resp.StatusCode)
+}
+
+func TestParseMultipartStorageFailure(t *testing.T) {
+	ast := assert.New(t)
+	dir := multipartTempDir(t)
+	occupied := filepath.Join(dir, "not-a-directory")
+	require.NoError(t, os.WriteFile(occupied, []byte("x"), 0600))
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(key, occupied)
+	}
+	r := multipartRequest(t, nil, uploadFile{"file", "data.txt", "content"})
+	var in validatedUpload
+	err := Parse(r, &in, WithMultipartMemory(0))
+	var storageErr *os.PathError
+	require.ErrorAs(t, err, &storageErr)
+	status, _ := DefaultErrorHandler(r, err)
+	ast.Equal(500, status)
+}
+
+func TestParseMultipartParserLimits(t *testing.T) {
+	ast := assert.New(t)
+	t.Setenv("GODEBUG", "multipartmaxparts=1")
+	r := multipartRequest(t, map[string][]string{"name": {"a", "b"}})
+	var in struct{}
+	err := Parse(r, &in)
+	require.ErrorIs(t, err, multipart.ErrMessageTooLarge)
+	status, _ := DefaultErrorHandler(r, err)
+	ast.Equal(413, status)
+}
+
+func TestParseMultipartTruncatedFileCleansTemporaryFiles(t *testing.T) {
+	ast := assert.New(t)
+	dir := multipartTempDir(t)
+	r := multipartRequest(t, nil, uploadFile{"file", "data.txt", strings.Repeat("x", 2048)})
+	data, err := io.ReadAll(r.Body)
+	require.NoError(t, err)
+	r.Body = io.NopCloser(bytes.NewReader(data[:len(data)-20]))
+	var in validatedUpload
+	err = Parse(r, &in, WithMultipartMemory(0))
+	require.Error(t, err)
+	status, _ := DefaultErrorHandler(r, err)
+	ast.Equal(400, status)
+	files, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	ast.Empty(files)
 }
 
 func ExampleParse() {

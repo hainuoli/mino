@@ -45,7 +45,7 @@ go get github.com/hainuoli/mino/rest
 mux := rest.NewMux()
 
 mux.Get("/", func(w http.ResponseWriter, r *http.Request) {
-	httpx.OkJSON(w, "Hello, Mino!")
+	httpx.Ok(w, "Hello, Mino!")
 })
 
 http.ListenAndServe(":8080", mux)
@@ -126,6 +126,8 @@ Go 1.25.4 · linux/amd64 · CGO 关闭 · `-trimpath -ldflags='-s -w'`。两者�
 </details>
 
 ## 继续探索
+
+[文件上传与中间件](docs/uploads.md) · [上传示例](examples/upload/main.go)
 
 [快速开始](https://github.com/hainuoli/mino-doc/blob/main/content/docs/zh/getting-started.mdx) · [包与默认行为](https://github.com/hainuoli/mino-doc/blob/main/content/docs/zh/packages.mdx) · [指南与示例](https://github.com/hainuoli/mino-doc) · [API 文档](https://pkg.go.dev/github.com/hainuoli/mino)
 
