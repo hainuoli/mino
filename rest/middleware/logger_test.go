@@ -218,7 +218,7 @@ func TestLoggerOptionsCanBeReusedConcurrently(t *testing.T) {
 	wg.Wait()
 }
 
-// Log capture fixtures, shared with recovery_test.go.
+// Log capture fixtures, shared with recovery_test.go and timeout_test.go.
 
 type logRecord struct {
 	level   slog.Level
