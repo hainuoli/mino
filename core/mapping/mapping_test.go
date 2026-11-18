@@ -310,6 +310,86 @@ func TestBindEmbeddedFields(t *testing.T) {
 	}
 }
 
+func TestBindWithTypedValues(t *testing.T) {
+	ast := assert.New(t)
+	type Fields struct {
+		Count int    `field:"count"`
+		Keep  string `field:"missing"`
+	}
+	type Input struct {
+		*Fields
+		Ignored int `field:"-"`
+	}
+	var in Input
+	err := BindWith(&in, "field", nil, func(reflect.StructField) (reflect.Value, bool, error) {
+		return reflect.Value{}, true, nil
+	})
+	ast.NoError(err)
+	ast.Nil(in.Fields)
+
+	err = BindWith(&in, "field", nil, func(field reflect.StructField) (reflect.Value, bool, error) {
+		if field.Tag.Get("field") == "count" {
+			return reflect.ValueOf(42), true, nil
+		}
+		return reflect.Value{}, true, nil
+	})
+	if !ast.NoError(err) || !ast.NotNil(in.Fields) {
+		return
+	}
+	ast.Equal(42, in.Count)
+	in.Keep = "default"
+	ast.NoError(BindWith(&in, "field", nil, nil))
+	ast.Equal("default", in.Keep)
+}
+
+func TestBindWithInvalidValues(t *testing.T) {
+	failure := errors.New("lookup failed")
+	private := reflect.ValueOf(struct{ value int }{}).Field(0)
+	tests := []struct {
+		name  string
+		value reflect.Value
+		err   error
+		want  error
+	}{
+		{"wrong type", reflect.ValueOf("wrong"), nil, ErrInvalidTarget},
+		{"inaccessible value", private, nil, ErrInvalidTarget},
+		{"lookup failure", reflect.Value{}, failure, failure},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			var in struct {
+				Count int `field:"count"`
+			}
+			err := BindWith(&in, "field", nil, func(reflect.StructField) (reflect.Value, bool, error) {
+				return tt.value, true, tt.err
+			})
+			ast.ErrorIs(err, tt.want)
+			ast.Zero(in.Count)
+		})
+	}
+}
+
+func TestBindWithTextFallback(t *testing.T) {
+	ast := assert.New(t)
+	in := struct {
+		Count int `field:"count"`
+		Keep  int `field:"keep"`
+	}{Keep: 7}
+	err := BindWith(&in, "field", func(string) []string {
+		return []string{"42"}
+	}, func(field reflect.StructField) (reflect.Value, bool, error) {
+		if field.Name == "Keep" {
+			return reflect.Value{}, true, nil
+		}
+		return reflect.Value{}, false, nil
+	})
+	if ast.NoError(err) {
+		ast.Equal(42, in.Count)
+		ast.Equal(7, in.Keep)
+	}
+}
+
 func ExampleDeref() {
 	count := 1
 	value, err := Deref(&count)

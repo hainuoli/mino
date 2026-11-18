@@ -47,6 +47,18 @@ func Deref(v any) (reflect.Value, error) {
 //	})
 //	// r.Page -> 52 for the query "?page=52"
 func Bind(v any, tag string, lookup func(string) []string) error {
+	return BindWith(v, tag, lookup, nil)
+}
+
+// BindWith extends Bind with a typed field lookup, without domain dependencies.
+// typed returns (value, handled, error). When handled is false, text lookup and
+// conversion follow Bind's rules. When handled is true, an invalid reflect.Value
+// means absent input and preserves the destination, without falling back to text.
+// Present typed values must be accessible and assignable to the field type.
+// Embedded pointers allocate only for present input. A nil callback is ignored.
+func BindWith(v any, tag string, lookup func(string) []string,
+	typed func(reflect.StructField) (reflect.Value, bool, error),
+) error {
 	rv, err := Deref(v)
 	if err != nil {
 		return err
@@ -54,7 +66,7 @@ func Bind(v any, tag string, lookup func(string) []string) error {
 	if rv.Kind() != reflect.Struct {
 		return fmt.Errorf("%w: expected a non-nil pointer to struct, got %T", ErrInvalidTarget, v)
 	}
-	if lookup == nil {
+	if lookup == nil && typed == nil {
 		return nil
 	}
 	for _, field := range reflect.VisibleFields(rv.Type()) {
@@ -65,15 +77,38 @@ func Bind(v any, tag string, lookup func(string) []string) error {
 		if name == "" || name == "-" {
 			continue
 		}
-		vs := lookup(name)
-		if len(vs) == 0 {
-			continue
+		var value reflect.Value
+		var handled bool
+		if typed != nil {
+			value, handled, err = typed(field)
+			if err != nil {
+				return errorx.Wrapf(err, "%s %q", tag, name)
+			}
+		}
+		var values []string
+		if handled {
+			if !value.IsValid() {
+				continue
+			}
+			if !value.CanInterface() || !value.Type().AssignableTo(field.Type) {
+				return fmt.Errorf("%w: %s %q: source must be accessible and assignable to %s", ErrInvalidTarget, tag, name, field.Type)
+			}
+		} else {
+			if lookup == nil {
+				continue
+			}
+			values = lookup(name)
+			if len(values) == 0 {
+				continue
+			}
 		}
 		fv, err := fieldValue(rv, field.Index)
 		if err != nil {
 			return errorx.Wrapf(err, "%s %q", tag, name)
 		}
-		if err := setValue(fv, vs); err != nil {
+		if handled {
+			fv.Set(value)
+		} else if err := setValue(fv, values); err != nil {
 			return errorx.Wrapf(err, "%s %q", tag, name)
 		}
 	}

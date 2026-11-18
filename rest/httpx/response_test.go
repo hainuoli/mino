@@ -18,12 +18,25 @@ import (
 )
 
 func TestOk(t *testing.T) {
-	ast := assert.New(t)
-	w := httptest.NewRecorder()
-	Ok(w)
-	ast.Equal(http.StatusOK, w.Code)
-	ast.Empty(w.Body.String())
-	ast.Empty(w.Header().Get("Content-Type"))
+	tests := []struct {
+		name  string
+		value any
+		body  string
+	}{
+		{"object", map[string]int{"id": 42}, `{"id":42}`},
+		{"empty string", "", `""`},
+		{"nil", nil, `null`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ast := assert.New(t)
+			w := httptest.NewRecorder()
+			Ok(w, tt.value)
+			ast.Equal(http.StatusOK, w.Code)
+			ast.Equal(tt.body, w.Body.String())
+			ast.Equal("application/json", w.Header().Get("Content-Type"))
+		})
+	}
 }
 
 func TestJSON(t *testing.T) {
@@ -87,7 +100,7 @@ func TestJSONCommitOrder(t *testing.T) {
 	ast := assert.New(t)
 	for _, writeErr := range []error{nil, io.ErrClosedPipe} {
 		w := &observedWriter{header: make(http.Header), err: writeErr}
-		OkJSON(w, marshalCheck(func() ([]byte, error) {
+		Ok(w, marshalCheck(func() ([]byte, error) {
 			ast.Empty(w.statuses)
 			ast.Empty(w.header.Get("Content-Type"))
 			return []byte(`{}`), nil
@@ -134,7 +147,7 @@ func TestJSONFailureLogsContext(t *testing.T) {
 	}{
 		{
 			name:     "encode failure",
-			write:    func(ctx context.Context, w http.ResponseWriter) { OkJSONCtx(ctx, w, make(chan int)) },
+			write:    func(ctx context.Context, w http.ResponseWriter) { OkCtx(ctx, w, make(chan int)) },
 			wantLogs: 1, wantTrace: "trace-42",
 		},
 		{
@@ -149,7 +162,7 @@ func TestJSONFailureLogsContext(t *testing.T) {
 		},
 		{
 			name:      "fallback write failure",
-			write:     func(ctx context.Context, w http.ResponseWriter) { OkJSONCtx(ctx, w, make(chan int)) },
+			write:     func(ctx context.Context, w http.ResponseWriter) { OkCtx(ctx, w, make(chan int)) },
 			failWrite: true, wantLogs: 2, wantTrace: "trace-42",
 		},
 		{
@@ -176,7 +189,7 @@ func TestJSONFailureLogsContext(t *testing.T) {
 		},
 		{
 			name:     "success shortcut uses background",
-			write:    func(_ context.Context, w http.ResponseWriter) { OkJSON(w, make(chan int)) },
+			write:    func(_ context.Context, w http.ResponseWriter) { Ok(w, make(chan int)) },
 			wantLogs: 1,
 		},
 	}
@@ -231,12 +244,12 @@ func TestJSONCodecIntegration(t *testing.T) {
 	var req struct{}
 	require.NoError(t, ParseJSON(httptest.NewRequest("POST", "/", bytes.NewBufferString(`{}`)), &req))
 	w := httptest.NewRecorder()
-	OkJSON(w, req)
+	Ok(w, req)
 	ast.Equal(1, codec.unmarshalCalls)
 	ast.Equal(1, codec.marshalCalls)
 	codec.fail = true
 	w = httptest.NewRecorder()
-	OkJSON(w, req)
+	Ok(w, req)
 	ast.Equal(2, codec.marshalCalls) // Literal fallback bypasses the broken codec.
 	ast.Equal(500, w.Code)
 	ast.JSONEq(`{"message":"internal error"}`, w.Body.String())
