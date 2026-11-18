@@ -6,6 +6,10 @@ after the version.
 
 ## Latest Changes
 
+### Breaking Changes
+
+* 💥 Add multipart uploads and simplify HTTP response helpers. PR [#18](https://github.com/hainuoli/mino/pull/18) by [@hainuoli](https://github.com/hainuoli).
+
 ### Features
 
 * ✨ Add access logging and panic recovery middleware. PR [#17](https://github.com/hainuoli/mino/pull/17) by [@hainuoli](https://github.com/hainuoli).
