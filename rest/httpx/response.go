@@ -2,6 +2,8 @@ package httpx
 
 import (
 	"context"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -29,7 +31,8 @@ func OkCtx(ctx context.Context, w http.ResponseWriter, v any) {
 // failures reply with a fixed JSON 500 rather than the error handler, and
 // write failures are logged. Statuses 204, 205, and 304 write no body;
 // invalid statuses fall back to 500. Failure logs use context.Background;
-// use JSONCtx to attach a request context.
+// use JSONCtx to attach a request context. Writes rejected with
+// http.ErrHandlerTimeout are not logged again.
 //
 //	httpx.JSON(w, http.StatusCreated, map[string]int{"id": 42})
 //	// body -> {"id":42}, status 201
@@ -59,6 +62,55 @@ func JSONCtx(ctx context.Context, w http.ResponseWriter, status int, v any) {
 		return
 	}
 	writeJSON(ctx, w, status, data)
+}
+
+// Stream calls step synchronously until it returns false or ctx is canceled.
+// Each completed step is flushed, including the last, unless the context was
+// canceled or a write failed. Set headers and any status before calling Stream;
+// it adds no protocol framing or error response. An empty step still flushes.
+//
+// Write and flush failures stop the stream and log once using ctx. Canceled
+// contexts and http.ErrHandlerTimeout stop it silently. Flush uses ResponseController,
+// including through Unwrap; unsupported flushing is logged, not ignored.
+//
+// ctx and step must not be nil. A blocking step must observe ctx itself.
+// The callback must use its writer synchronously and must not retain it after
+// Stream returns. Panics propagate to the caller, so Recovery remains in charge.
+//
+//	ticker := time.NewTicker(15 * time.Second)
+//	defer ticker.Stop()
+//	w.Header().Set("Content-Type", "text/event-stream")
+//	httpx.Stream(r.Context(), w, func(out io.Writer) bool {
+//		select {
+//		case <-r.Context().Done():
+//			return false
+//		case <-ticker.C:
+//			_, err := io.WriteString(out, ": ping\n\n")
+//			return err == nil
+//		}
+//	})
+func Stream(ctx context.Context, w http.ResponseWriter, step func(io.Writer) bool) {
+	out := &streamWriter{Writer: w}
+	rc := http.NewResponseController(w)
+	for ctx.Err() == nil {
+		more := step(out)
+		if ctx.Err() != nil {
+			return
+		}
+		err := out.err
+		if err == nil {
+			err = rc.Flush()
+		}
+		if err != nil {
+			if ctx.Err() == nil && !errors.Is(err, http.ErrHandlerTimeout) {
+				slog.ErrorContext(ctx, "httpx: stream response", "error", err)
+			}
+			return
+		}
+		if !more {
+			return
+		}
+	}
 }
 
 // Err maps err through the configured error handler and writes the response.
@@ -99,7 +151,25 @@ func writeInternalServerError(ctx context.Context, w http.ResponseWriter) {
 func writeJSON(ctx context.Context, w http.ResponseWriter, status int, data []byte) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if _, err := w.Write(data); err != nil {
+	if _, err := w.Write(data); err != nil && !errors.Is(err, http.ErrHandlerTimeout) {
 		slog.ErrorContext(ctx, "httpx: write JSON response", "error", err)
 	}
+}
+
+// streamWriter retains the first write failure, even if step ignores it.
+type streamWriter struct {
+	io.Writer
+	err error
+}
+
+func (w *streamWriter) Write(p []byte) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	n, err := w.Writer.Write(p)
+	if err == nil && n < len(p) {
+		err = io.ErrShortWrite
+	}
+	w.err = err
+	return n, err
 }
